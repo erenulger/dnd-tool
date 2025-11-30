@@ -328,6 +328,27 @@ app.get('/api/sessions/:sessionId', verifyAuth, async (req, res) => {
           };
         });
         
+        // Get current map if exists (filter by shared status for non-DM users)
+        let currentMap = null;
+        if (session.current_map_id) {
+          let mapQuery = supabase
+            .from('maps')
+            .select('*')
+            .eq('id', session.current_map_id);
+
+          // If user is not DM, only return shared maps
+          if (!membership.is_dm) {
+            mapQuery = mapQuery.eq('shared', true);
+          }
+
+          const { data: map, error: mapError } = await mapQuery.single();
+
+          // Only set currentMap if map exists and (is shared OR user is DM)
+          if (!mapError && map) {
+            currentMap = map;
+          }
+        }
+        
         res.json({
           session: {
             ...session,
@@ -357,15 +378,22 @@ app.get('/api/sessions/:sessionId', verifyAuth, async (req, res) => {
       };
     });
 
-    // Get current map if exists
+    // Get current map if exists (filter by shared status for non-DM users)
     let currentMap = null;
     if (session.current_map_id) {
-      const { data: map, error: mapError } = await supabase
+      let mapQuery = supabase
         .from('maps')
         .select('*')
-        .eq('id', session.current_map_id)
-        .single();
+        .eq('id', session.current_map_id);
 
+      // If user is not DM, only return shared maps
+      if (!membership.is_dm) {
+        mapQuery = mapQuery.eq('shared', true);
+      }
+
+      const { data: map, error: mapError } = await mapQuery.single();
+
+      // Only set currentMap if map exists and (is shared OR user is DM)
       if (!mapError && map) {
         currentMap = map;
       }
@@ -1062,7 +1090,7 @@ app.post('/api/sessions/:sessionId/maps', verifyAuth, upload.single('map'), asyn
       return res.status(403).json({ error: 'Only the DM can upload maps' });
     }
 
-    // Create map record
+    // Create map record (default to not shared - DM can share later)
     const { data: map, error: mapError } = await supabase
       .from('maps')
       .insert({
@@ -1073,6 +1101,8 @@ app.post('/api/sessions/:sessionId/maps', verifyAuth, upload.single('map'), asyn
         file_path: `/uploads/${req.file.filename}`,
         file_size: req.file.size,
         mime_type: req.file.mimetype,
+        shared: false, // Default to not shared - DM must explicitly share
+        fog_of_war: null, // No fog of war initially
         uploaded_at: new Date().toISOString()
       })
       .select()
@@ -1102,16 +1132,114 @@ app.post('/api/sessions/:sessionId/maps', verifyAuth, upload.single('map'), asyn
   }
 });
 
+// Share/unshare map (DM only)
+app.put('/api/maps/:mapId/share', verifyAuth, async (req, res) => {
+  try {
+    const { mapId } = req.params;
+    const { shared } = req.body;
+    const userId = req.user.id;
+
+    // Get map (without join - just get the map directly)
+    const { data: map, error: mapError } = await supabase
+      .from('maps')
+      .select('*')
+      .eq('id', mapId)
+      .single();
+
+    if (mapError || !map) {
+      console.error('Map not found error:', mapError);
+      return res.status(404).json({ error: 'Map not found' });
+    }
+
+    // Verify user is DM
+    const { data: membership, error: memberError } = await supabase
+      .from('session_members')
+      .select('is_dm')
+      .eq('session_id', map.session_id)
+      .eq('user_id', userId)
+      .single();
+
+    if (memberError || !membership || !membership.is_dm) {
+      return res.status(403).json({ error: 'Only the DM can share/unshare maps' });
+    }
+
+    // Update map shared status
+    const { data: updatedMap, error: updateError } = await supabase
+      .from('maps')
+      .update({ shared: shared !== false })
+      .eq('id', mapId)
+      .select()
+      .single();
+
+    if (updateError) throw updateError;
+
+    res.json({ map: updatedMap });
+  } catch (error) {
+    console.error('Share map error:', error);
+    res.status(500).json({ error: error.message || 'Failed to share map' });
+  }
+});
+
+// Update fog of war (DM only)
+app.put('/api/maps/:mapId/fog-of-war', verifyAuth, async (req, res) => {
+  try {
+    const { mapId } = req.params;
+    const { fog_of_war } = req.body;
+    const userId = req.user.id;
+
+    // Get map
+    const { data: map, error: mapError } = await supabase
+      .from('maps')
+      .select('*')
+      .eq('id', mapId)
+      .single();
+
+    if (mapError || !map) {
+      console.error('Map not found error:', mapError);
+      return res.status(404).json({ error: 'Map not found' });
+    }
+
+    // Verify user is DM
+    const { data: membership, error: memberError } = await supabase
+      .from('session_members')
+      .select('is_dm')
+      .eq('session_id', map.session_id)
+      .eq('user_id', userId)
+      .single();
+
+    if (memberError || !membership || !membership.is_dm) {
+      return res.status(403).json({ error: 'Only the DM can update fog of war' });
+    }
+
+    // Update fog of war (store as JSON string)
+    const fogOfWarJson = fog_of_war ? JSON.stringify(fog_of_war) : null;
+    
+    const { data: updatedMap, error: updateError } = await supabase
+      .from('maps')
+      .update({ fog_of_war: fogOfWarJson })
+      .eq('id', mapId)
+      .select()
+      .single();
+
+    if (updateError) throw updateError;
+
+    res.json({ map: updatedMap });
+  } catch (error) {
+    console.error('Update fog of war error:', error);
+    res.status(500).json({ error: error.message || 'Failed to update fog of war' });
+  }
+});
+
 // Get current map for session
 app.get('/api/sessions/:sessionId/map', verifyAuth, async (req, res) => {
   try {
     const { sessionId } = req.params;
     const userId = req.user.id;
 
-    // Verify user is a member
+    // Verify user is a member and check if DM
     const { data: membership, error: memberError } = await supabase
       .from('session_members')
-      .select('id')
+      .select('id, is_dm')
       .eq('session_id', sessionId)
       .eq('user_id', userId)
       .single();
@@ -1119,6 +1247,8 @@ app.get('/api/sessions/:sessionId/map', verifyAuth, async (req, res) => {
     if (memberError || !membership) {
       return res.status(403).json({ error: 'You are not a member of this session' });
     }
+
+    const isDm = membership.is_dm;
 
     // Get session to find current map
     const { data: session, error: sessionError } = await supabase
@@ -1134,15 +1264,27 @@ app.get('/api/sessions/:sessionId/map', verifyAuth, async (req, res) => {
     }
 
     // Get map details
-    const { data: map, error: mapError } = await supabase
+    let mapQuery = supabase
       .from('maps')
       .select('*')
-      .eq('id', session.current_map_id)
-      .single();
+      .eq('id', session.current_map_id);
 
-    if (mapError) throw mapError;
+    // If user is not DM, only show shared maps
+    if (!isDm) {
+      mapQuery = mapQuery.eq('shared', true);
+    }
 
-    res.json({ map });
+    const { data: map, error: mapError } = await mapQuery.single();
+
+    if (mapError) {
+      // If map not found and user is not DM, it might be because map is not shared
+      if (!isDm) {
+        return res.json({ map: null });
+      }
+      throw mapError;
+    }
+
+    res.json({ map: map || null });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -1166,13 +1308,31 @@ app.get('/api/sessions/:sessionId/pawns', verifyAuth, async (req, res) => {
       return res.status(403).json({ error: 'You are not a member of this session' });
     }
 
+    // Check if user is DM
+    const { data: dmCheck, error: dmCheckError } = await supabase
+      .from('session_members')
+      .select('is_dm')
+      .eq('session_id', sessionId)
+      .eq('user_id', userId)
+      .single();
+
+    const isDm = dmCheck?.is_dm || false;
+
     // Get all active pawns for this session (status is null)
-    const { data: pawns, error: pawnsError } = await supabase
+    // If user is not DM, filter out invisible pawns
+    let pawnsQuery = supabase
       .from('pawns')
       .select('*')
       .eq('session_id', sessionId)
       .is('status', null)
       .order('created_at', { ascending: true });
+
+    // Filter invisible pawns for non-DM users
+    if (!isDm) {
+      pawnsQuery = pawnsQuery.eq('visible', true);
+    }
+
+    const { data: pawns, error: pawnsError } = await pawnsQuery;
 
     if (pawnsError) throw pawnsError;
 
@@ -1187,7 +1347,7 @@ app.get('/api/sessions/:sessionId/pawns', verifyAuth, async (req, res) => {
 app.post('/api/sessions/:sessionId/pawns', verifyAuth, async (req, res) => {
   try {
     const { sessionId } = req.params;
-    const { name, color, x_position, y_position, owned_by, hp, max_hp } = req.body;
+    const { name, color, status_color, x_position, y_position, owned_by, hp, max_hp, visible } = req.body;
     const userId = req.user.id;
 
     // Verify user is DM
@@ -1211,10 +1371,12 @@ app.post('/api/sessions/:sessionId/pawns', verifyAuth, async (req, res) => {
         owned_by: owned_by || null,
         name: name || 'New Pawn',
         color: color || '#667eea',
+        status_color: status_color || null,
         x_position: x_position || 0,
         y_position: y_position || 0,
         hp: hp !== undefined && hp !== null ? hp : null,
         max_hp: max_hp !== undefined && max_hp !== null ? max_hp : null,
+        visible: visible !== undefined ? visible : true, // Default to visible
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
       })
@@ -1234,7 +1396,7 @@ app.post('/api/sessions/:sessionId/pawns', verifyAuth, async (req, res) => {
 app.put('/api/pawns/:pawnId', verifyAuth, async (req, res) => {
   try {
     const { pawnId } = req.params;
-    const { x_position, y_position, hp, max_hp } = req.body;
+    const { x_position, y_position, hp, max_hp, visible, name, color, status_color, owned_by } = req.body;
     const userId = req.user.id;
 
     // Get pawn
@@ -1275,10 +1437,22 @@ app.put('/api/pawns/:pawnId', verifyAuth, async (req, res) => {
     if (y_position !== undefined) updateData.y_position = parseFloat(y_position);
     if (hp !== undefined) updateData.hp = hp !== null ? hp : null;
     if (max_hp !== undefined) updateData.max_hp = max_hp !== null ? max_hp : null;
+    if (visible !== undefined) updateData.visible = visible;
+    if (name !== undefined) updateData.name = name;
+    if (color !== undefined) updateData.color = color;
+    if (status_color !== undefined) updateData.status_color = status_color || null;
+    if (owned_by !== undefined) updateData.owned_by = owned_by || null;
     
-    // If updating HP, verify user is DM
-    if ((hp !== undefined || max_hp !== undefined) && !membership.is_dm) {
-      return res.status(403).json({ error: 'Only the DM can update pawn HP' });
+    // If updating HP, visibility, name, color, or owned_by, verify user is DM
+    if ((hp !== undefined || max_hp !== undefined || visible !== undefined || name !== undefined || color !== undefined || owned_by !== undefined) && !membership.is_dm) {
+      return res.status(403).json({ error: 'Only the DM can update pawn properties' });
+    }
+    
+    // Players can update their own pawn's status_color
+    if (status_color !== undefined && !membership.is_dm) {
+      if (pawn.owned_by !== userId) {
+        return res.status(403).json({ error: 'You can only update your own pawn\'s status color' });
+      }
     }
 
     // Update pawn
@@ -1609,7 +1783,7 @@ app.get('/api/sessions/:sessionId/personal-notes', verifyAuth, async (req, res) 
 app.post('/api/sessions/:sessionId/personal-notes', verifyAuth, async (req, res) => {
   try {
     const { sessionId } = req.params;
-    const { title, note_text, background_color } = req.body;
+    const { title, note_text } = req.body;
     const userId = req.user.id;
 
     if (!note_text || !note_text.trim()) {
@@ -1636,7 +1810,6 @@ app.post('/api/sessions/:sessionId/personal-notes', verifyAuth, async (req, res)
         user_id: userId,
         title: title?.trim() || null,
         note_text: note_text.trim(),
-        background_color: background_color || 'default',
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
       })
@@ -1726,7 +1899,7 @@ app.get('/api/sessions/:sessionId/shared-notes', verifyAuth, async (req, res) =>
 app.post('/api/sessions/:sessionId/shared-notes', verifyAuth, async (req, res) => {
   try {
     const { sessionId } = req.params;
-    const { title, note_text, background_color } = req.body;
+    const { title, note_text } = req.body;
     const userId = req.user.id;
 
     if (!note_text || !note_text.trim()) {
@@ -1753,7 +1926,6 @@ app.post('/api/sessions/:sessionId/shared-notes', verifyAuth, async (req, res) =
         created_by: userId,
         title: title?.trim() || null,
         note_text: note_text.trim(),
-        background_color: background_color || 'default',
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
       })

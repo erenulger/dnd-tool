@@ -5,19 +5,48 @@
       <button @click="zoomOut" class="control-btn" title="Zoom Out">−</button>
       <button @click="resetView" class="control-btn" title="Reset View">⌂</button>
       <span class="zoom-level">{{ Math.round(scale * 100) }}%</span>
+      <!-- Fog of War Controls (DM only) -->
+      <div v-if="isDm" class="fog-controls">
+        <button 
+          @click="toggleFogDrawMode" 
+          :class="['control-btn', 'fog-btn', { 'active': fogDrawMode === 'draw' }]"
+          title="Draw Fog of War"
+        >
+          ☁️
+        </button>
+        <button 
+          @click="fogDrawMode = fogDrawMode === 'delete' ? null : 'delete'" 
+          :class="['control-btn', 'fog-btn', { 'active': fogDrawMode === 'delete' }]"
+          title="Delete Fog of War"
+        >
+          🗑️
+        </button>
+        <button 
+          v-if="fogDrawMode === 'draw' && currentFogPolygon.length >= 3"
+          @click="finishFogPolygon" 
+          class="control-btn fog-btn"
+          title="Finish Polygon (Enter)"
+        >
+          ✓
+        </button>
+        <button 
+          v-if="fogDrawMode"
+          @click="cancelFogDrawing" 
+          class="control-btn fog-btn"
+          title="Cancel (Esc)"
+        >
+          ✕
+        </button>
+      </div>
     </div>
     
     <div 
       class="map-viewer"
       ref="viewerRef"
+      :class="{ 'map-dragging': isDragging, 'fog-mode-active': fogDrawMode }"
       @mousedown="handleMouseDown"
-      @mousemove="handleMouseMove"
-      @mouseup="handleMouseUp"
-      @mouseleave="handleMouseUp"
       @wheel="handleWheel"
       @touchstart="handleTouchStart"
-      @touchmove="handleTouchMove"
-      @touchend="handleTouchEnd"
     >
       <div class="map-image-wrapper" :style="imageStyle">
         <img
@@ -29,31 +58,107 @@
           draggable="false"
         />
       </div>
+      <!-- Fog of War overlay -->
+      <svg 
+        v-if="fogOfWar && fogOfWar.length > 0"
+        class="fog-of-war-overlay"
+        :style="fogOverlayStyle"
+      >
+        <g :transform="`translate(${translateX}, ${translateY}) scale(${scale})`">
+          <polygon
+            v-for="(fog, index) in fogOfWar"
+            :key="index"
+            :points="getFogPolygonPoints(fog)"
+            :class="{ 'fog-dm-view': isDm, 'fog-player-view': !isDm }"
+            @click="isDm && fogDrawMode === 'delete' ? deleteFog(index) : null"
+            :style="{ cursor: isDm && fogDrawMode === 'delete' ? 'pointer' : 'default' }"
+          />
+        </g>
+      </svg>
+      
+      <!-- Fog of War Drawing Overlay (DM only, when in draw mode) -->
+      <svg
+        v-if="isDm && fogDrawMode === 'draw'"
+        class="fog-drawing-overlay"
+        :style="fogDrawingOverlayStyle"
+        @mousedown="handleFogMouseDown"
+        @mousemove="handleFogMouseMove"
+        @mouseup="handleFogMouseUp"
+      >
+        <polygon
+          v-if="currentFogPolygon.length > 2"
+          :points="getCurrentFogPolygonPoints()"
+          class="fog-preview"
+        />
+        <polyline
+          v-if="currentFogPolygon.length > 0"
+          :points="getCurrentFogPolygonPoints()"
+          class="fog-preview-line"
+          fill="none"
+        />
+        <circle
+          v-for="(point, index) in currentFogPolygon"
+          :key="index"
+          :cx="point.screenX"
+          :cy="point.screenY"
+          r="4"
+          class="fog-point-marker"
+        />
+        <text
+          v-if="currentFogPolygon.length > 0"
+          :x="currentFogPolygon[currentFogPolygon.length - 1].screenX + 10"
+          :y="currentFogPolygon[currentFogPolygon.length - 1].screenY - 10"
+          class="fog-instruction-text"
+        >
+          Click to add point • Enter to finish • Esc to cancel
+        </text>
+      </svg>
+      
       <!-- Pawns overlay - positioned relative to viewer, not image wrapper -->
       <div class="pawns-overlay">
         <div
-          v-for="pawn in pawns"
+          v-for="pawn in visiblePawns"
           :key="pawn.id"
           class="pawn"
-          :class="{ 'pawn-dragging': draggingPawnId === pawn.id, 'pawn-owned': pawn.owned_by === currentUserId, 'pawn-dm-control': isDm }"
+          :class="{ 'pawn-dragging': draggingPawnId === pawn.id, 'pawn-owned': pawn.owned_by === currentUserId, 'pawn-dm-control': isDm, 'pawn-invisible': !pawn.visible && isDm, 'pawn-highlighted': highlightedPawnId === pawn.id }"
           :style="getPawnStyle(pawn)"
-          @mousedown="handlePawnMouseDown($event, pawn)"
-          @touchstart="handlePawnTouchStart($event, pawn)"
-          :title="pawn.name"
+          @mousedown="initiativeMode ? handlePawnClick($event, pawn) : handlePawnMouseDown($event, pawn)"
+          @touchstart="initiativeMode ? handlePawnClick($event, pawn) : handlePawnTouchStart($event, pawn)"
+          :title="pawn.name + (!pawn.visible && isDm ? ' (Invisible)' : '')"
         >
           <div class="pawn-circle" :style="{ backgroundColor: pawn.color }">
             <span class="pawn-initial">{{ getPawnInitial(pawn.name) }}</span>
+          </div>
+          <!-- Status color circle at upper left (clickable for owners) -->
+          <div 
+            class="pawn-status-color" 
+            :class="{ 'pawn-status-color-clickable': (pawn.owned_by === currentUserId || isDm) && !initiativeMode, 'pawn-status-color-empty': !pawn.status_color }"
+            :style="{ backgroundColor: pawn.status_color || 'transparent' }"
+            @mousedown.stop="(pawn.owned_by === currentUserId || isDm) && !initiativeMode ? handleStatusColorClick($event, pawn) : null"
+            @touchstart.stop="(pawn.owned_by === currentUserId || isDm) && !initiativeMode ? handleStatusColorClick($event, pawn) : null"
+            :title="(pawn.owned_by === currentUserId || isDm) && !initiativeMode ? 'Click to change status color' : ''"
+          >
+            <span v-if="!pawn.status_color" class="status-color-add-icon">+</span>
           </div>
           <div class="pawn-label">{{ pawn.name }}</div>
           <div 
             v-if="(pawn.hp !== null && pawn.hp !== undefined) || (pawn.max_hp !== null && pawn.max_hp !== undefined)" 
             class="pawn-hp" 
-            :class="{ 'pawn-hp-clickable': isDm }"
-            @click.stop="isDm ? editPawnHp(pawn) : null"
-            :title="isDm ? 'Click to edit HP' : ''"
+            :class="{ 'pawn-hp-clickable': isDm && !initiativeMode }"
+            @click.stop="isDm && !initiativeMode ? editPawnHp(pawn) : null"
+            :title="isDm && !initiativeMode ? 'Click to edit HP' : ''"
           >
             HP: {{ pawn.hp !== null && pawn.hp !== undefined ? pawn.hp : '?' }}{{ pawn.max_hp ? ` (${pawn.max_hp})` : '' }}
           </div>
+          <!-- Edit button for DM -->
+          <button
+            v-if="isDm && !initiativeMode"
+            @click.stop="editPawn(pawn)"
+            class="pawn-edit-btn"
+            title="Edit Pawn"
+          >
+            ✎
+          </button>
           <!-- Delete button for DM -->
           <button
             v-if="isDm"
@@ -104,6 +209,13 @@
             <label>Max HP (optional)</label>
             <input type="number" v-model.number="newPawn.max_hp" min="0" placeholder="Leave empty for no HP" />
             <small>Current HP will be set equal to Max HP</small>
+          </div>
+          <div class="form-group">
+            <label>
+              <input type="checkbox" v-model="newPawn.visible" />
+              Visible to Players
+            </label>
+            <small>If unchecked, only the DM can see this pawn</small>
           </div>
           <div class="modal-actions">
             <button type="button" @click="showCreatePawnModal = false" class="btn btn-secondary">
@@ -201,6 +313,71 @@
         </form>
       </div>
     </div>
+
+    <!-- Edit Pawn Modal -->
+    <div v-if="pawnToEdit" class="modal-overlay" @click="pawnToEdit = null">
+      <div class="modal-content" @click.stop>
+        <h3>Edit Pawn - {{ pawnToEdit.name }}</h3>
+        <form @submit.prevent="savePawnEdit">
+          <!-- DM-only fields -->
+          <template v-if="isDm">
+            <div class="form-group">
+              <label>Name</label>
+              <input type="text" v-model="editingPawn.name" required maxlength="100" />
+            </div>
+            <div class="form-group">
+              <label>Color</label>
+              <input type="color" v-model="editingPawn.color" />
+            </div>
+            <div class="form-group">
+              <label>Assign to Player</label>
+              <select v-model="editingPawn.owned_by">
+                <option :value="null">NPC</option>
+                <option v-for="member in sessionMembers" :key="member.user_id" :value="member.user_id">
+                  {{ member.nickname || member.users?.email || 'Unknown' }}
+                </option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Current HP</label>
+              <input type="number" v-model.number="editingPawn.hp" min="0" />
+              <small>Leave empty if no HP</small>
+            </div>
+            <div class="form-group">
+              <label>Max HP</label>
+              <input type="number" v-model.number="editingPawn.max_hp" min="0" />
+              <small>Leave empty if no max HP</small>
+            </div>
+            <div class="form-group">
+              <label>
+                <input type="checkbox" v-model="editingPawn.visible" />
+                Visible to Players
+              </label>
+              <small>If unchecked, only the DM can see this pawn</small>
+            </div>
+          </template>
+          <!-- Status Color (editable by owner or DM) -->
+          <div class="form-group">
+            <label>Status Color</label>
+            <div class="status-color-selector">
+              <button
+                v-for="colorOption in statusColorOptions"
+                :key="colorOption.value"
+                type="button"
+                class="status-color-option"
+                :class="{ 'active': editingPawn.status_color === colorOption.value }"
+                :style="{ backgroundColor: colorOption.value || 'transparent' }"
+                @click="selectStatusColor(colorOption.value)"
+                :title="colorOption.label"
+              >
+                <span v-if="colorOption.value === null" class="status-color-none">×</span>
+              </button>
+            </div>
+            <small>Optional: Color circle shown at upper left of pawn</small>
+          </div>
+        </form>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -230,13 +407,31 @@ export default {
     currentUserId: {
       type: String,
       required: true
+    },
+    mapId: {
+      type: String,
+      default: null
+    },
+    fogOfWar: {
+      type: Array,
+      default: () => []
+    },
+    highlightedPawnId: {
+      type: String,
+      default: null
+    },
+    initiativeMode: {
+      type: Boolean,
+      default: false
     }
   },
-  emits: ['pawn-moved', 'pawn-created', 'enemy-status-changed'],
+  emits: ['pawn-moved', 'pawn-created', 'enemy-status-changed', 'fog-of-war-updated', 'pawn-clicked'],
   setup(props, { emit }) {
     const containerRef = ref(null)
     const viewerRef = ref(null)
     const imageRef = ref(null)
+    
+    const highlightedPawnId = computed(() => props.highlightedPawnId || null)
     
     // Transform state
     const scale = ref(1)
@@ -274,14 +469,97 @@ export default {
     const editingHp = ref(0)
     const editingMaxHp = ref(null)
     const updatingHp = ref(false)
+    const pawnToEdit = ref(null)
+    const editingPawn = ref({
+      name: '',
+      color: '#667eea',
+      status_color: null,
+      owned_by: null,
+      hp: null,
+      max_hp: null,
+      visible: true
+    })
+    
+    // Ensure color is always valid hex format
+    watch(() => editingPawn.value.color, (newColor) => {
+      if (!newColor || !/^#[0-9A-Fa-f]{6}$/.test(newColor)) {
+        editingPawn.value.color = '#667eea'
+      }
+    })
+    const updatingPawn = ref(false)
     const newPawn = ref({
       name: '',
       color: '#667eea',
+      status_color: null,
       owned_by: null,
-      max_hp: null
+      max_hp: null,
+      visible: true
+    })
+    
+    // Ensure color is always valid hex format
+    watch(() => newPawn.value.color, (newColor) => {
+      if (!newColor || !/^#[0-9A-Fa-f]{6}$/.test(newColor)) {
+        newPawn.value.color = '#667eea'
+      }
     })
     let pawnsPollInterval = null
     
+    // Fog of War state
+    const fogDrawMode = ref(null) // null, 'draw', or 'delete'
+    const currentFogPolygon = ref([]) // Points being drawn
+    const isDrawingFog = ref(false)
+    
+    // Status color options
+    const statusColorOptions = [
+      { label: 'Red', value: '#ff0000' },
+      { label: 'Orange', value: '#ff8800' },
+      { label: 'Yellow', value: '#ffff00' },
+      { label: 'Green', value: '#00ff00' },
+      { label: 'Blue', value: '#0000ff' },
+      { label: 'Purple', value: '#8800ff' },
+      { label: 'White', value: '#ffffff' },
+      { label: 'Black', value: '#000000' },
+      { label: 'None', value: null }
+    ]
+    
+    // Filter pawns based on visibility (non-DM users can't see invisible pawns)
+    const visiblePawns = computed(() => {
+      if (props.isDm) {
+        // DM can see all pawns
+        return pawns.value
+      } else {
+        // Players can only see visible pawns
+        return pawns.value.filter(pawn => pawn.visible !== false)
+      }
+    })
+
+    // Fog of War overlay style (covers entire viewer)
+    const fogOverlayStyle = computed(() => {
+      return {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        width: '100%',
+        height: '100%',
+        pointerEvents: fogDrawMode.value === 'delete' ? 'auto' : 'none',
+        zIndex: 250 // Above pawns (100) and dragging pawns (200), below controls (300)
+      }
+    })
+
+    // Fog drawing overlay style (covers entire viewer, captures clicks)
+    const fogDrawingOverlayStyle = computed(() => {
+      return {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        width: '100%',
+        height: '100%',
+        pointerEvents: 'auto',
+        zIndex: 251, // Above fog overlay, below controls (300)
+        cursor: 'crosshair'
+      }
+    })
+
     const imageStyle = computed(() => {
       if (imageWidth.value === 0 || imageHeight.value === 0) {
         return {
@@ -420,9 +698,17 @@ export default {
     
     const handleMouseDown = (e) => {
       if (e.button !== 0) return // Only left mouse button
+      // Don't start dragging if clicking on a pawn
+      if (e.target.closest('.pawn')) return
+      // Don't start dragging if fog drawing mode is active
+      if (fogDrawMode.value === 'draw' || fogDrawMode.value === 'delete') return
+      
       isDragging.value = true
       dragStart.value = { x: e.clientX, y: e.clientY }
       e.preventDefault()
+      
+      document.addEventListener('mousemove', handleMouseMove)
+      document.addEventListener('mouseup', handleMouseUp)
     }
     
     const handleMouseMove = (e) => {
@@ -431,8 +717,11 @@ export default {
       const deltaX = e.clientX - dragStart.value.x
       const deltaY = e.clientY - dragStart.value.y
       
-      translateX.value = lastTranslate.value.x + deltaX
-      translateY.value = lastTranslate.value.y + deltaY
+      // Apply damping factor to reduce acceleration (0.8 = 80% of movement)
+      const dragSensitivity = 0.8
+      
+      translateX.value = lastTranslate.value.x + deltaX * dragSensitivity
+      translateY.value = lastTranslate.value.y + deltaY * dragSensitivity
       
       // Constrain during drag to prevent dead zones
       constrainTranslation()
@@ -444,6 +733,9 @@ export default {
         constrainTranslation()
         lastTranslate.value = { x: translateX.value, y: translateY.value }
         isDragging.value = false
+        
+        document.removeEventListener('mousemove', handleMouseMove)
+        document.removeEventListener('mouseup', handleMouseUp)
       }
     }
     
@@ -461,6 +753,11 @@ export default {
     }
     
     const handleTouchStart = (e) => {
+      // Don't start dragging if touching a pawn
+      if (e.target.closest('.pawn')) return
+      // Don't start dragging if fog drawing mode is active
+      if (fogDrawMode.value === 'draw' || fogDrawMode.value === 'delete') return
+      
       touches.value = Array.from(e.touches)
       
       if (touches.value.length === 2) {
@@ -468,10 +765,15 @@ export default {
         touchStartDistance.value = getDistance(touches.value[0], touches.value[1])
         touchStartScale.value = scale.value
         touchStartTranslate.value = { x: translateX.value, y: translateY.value }
+        e.preventDefault()
       } else if (touches.value.length === 1) {
         // Single touch drag
         isDragging.value = true
         dragStart.value = { x: touches.value[0].clientX, y: touches.value[0].clientY }
+        e.preventDefault()
+        
+        document.addEventListener('touchmove', handleTouchMove, { passive: false })
+        document.addEventListener('touchend', handleTouchEnd)
       }
     }
     
@@ -506,8 +808,11 @@ export default {
         const deltaX = touches.value[0].clientX - dragStart.value.x
         const deltaY = touches.value[0].clientY - dragStart.value.y
         
-        translateX.value = lastTranslate.value.x + deltaX
-        translateY.value = lastTranslate.value.y + deltaY
+        // Apply damping factor to reduce acceleration (0.8 = 80% of movement)
+        const dragSensitivity = 0.8
+        
+        translateX.value = lastTranslate.value.x + deltaX * dragSensitivity
+        translateY.value = lastTranslate.value.y + deltaY * dragSensitivity
         
         // Constrain during drag
         constrainTranslation()
@@ -520,11 +825,17 @@ export default {
         constrainTranslation()
         lastTranslate.value = { x: translateX.value, y: translateY.value }
         isDragging.value = false
+        
+        document.removeEventListener('touchmove', handleTouchMove)
+        document.removeEventListener('touchend', handleTouchEnd)
       }
       touches.value = []
     }
     
     const loadPawns = async () => {
+      // Don't load pawns if we're currently dragging one (to prevent overwriting local state)
+      if (draggingPawnId.value) return
+      
       try {
         const { data } = await api.get(`/sessions/${props.sessionId}/pawns`)
         const loadedPawns = data.pawns || []
@@ -560,7 +871,30 @@ export default {
           // Reload pawns after creating new ones
           if (membersWithoutPawns.length > 0) {
             const { data: reloadData } = await api.get(`/sessions/${props.sessionId}/pawns`)
-            pawns.value = reloadData.pawns || []
+            // Only update if not dragging
+            if (!draggingPawnId.value) {
+              pawns.value = reloadData.pawns || []
+            }
+            return
+          }
+        }
+        
+        // Preserve the dragged pawn's position if we're currently dragging
+        if (draggingPawnId.value) {
+          const draggedPawn = pawns.value.find(p => p.id === draggingPawnId.value)
+          if (draggedPawn) {
+            // Update other pawns but keep the dragged pawn's current position
+            const updatedPawns = loadedPawns.map(loadedPawn => {
+              if (loadedPawn.id === draggingPawnId.value) {
+                return draggedPawn // Keep local state for dragged pawn
+              }
+              return loadedPawn
+            })
+            // Also add the dragged pawn if it's not in the loaded list
+            if (!updatedPawns.find(p => p.id === draggingPawnId.value)) {
+              updatedPawns.push(draggedPawn)
+            }
+            pawns.value = updatedPawns
             return
           }
         }
@@ -602,8 +936,167 @@ export default {
     const getPawnInitial = (name) => {
       return name ? name.charAt(0).toUpperCase() : '?'
     }
+
+    // Fog of War functions
+    const getFogPolygonPoints = (fog) => {
+      if (!fog.points || !Array.isArray(fog.points)) return ''
+      // Points are stored in image pixel coordinates
+      // SVG is already transformed, so use image coordinates directly
+      return fog.points.map(point => {
+        return `${point[0]},${point[1]}`
+      }).join(' ')
+    }
+
+    const getCurrentFogPolygonPoints = () => {
+      if (currentFogPolygon.value.length < 2) return ''
+      // Points are stored in screen coordinates, convert to image coordinates for display
+      return currentFogPolygon.value.map(point => {
+        // Convert screen coordinates to image coordinates
+        const imageX = (point.screenX - translateX.value) / scale.value
+        const imageY = (point.screenY - translateY.value) / scale.value
+        // Apply transform to show in correct position on screen
+        const screenX = translateX.value + imageX * scale.value
+        const screenY = translateY.value + imageY * scale.value
+        return `${screenX},${screenY}`
+      }).join(' ')
+    }
+
+    const handleFogMouseDown = (e) => {
+      if (fogDrawMode.value !== 'draw') return
+      if (e.target.closest('.pawn')) return
+      // Don't capture clicks on controls or buttons
+      if (e.target.closest('.map-viewer-controls') || e.target.closest('.create-pawn-btn')) return
+      
+      e.stopPropagation()
+      e.preventDefault()
+      
+      if (!viewerRef.value) return
+      
+      const rect = viewerRef.value.getBoundingClientRect()
+      const screenX = e.clientX - rect.left
+      const screenY = e.clientY - rect.top
+      
+      // Convert screen coordinates to image pixel coordinates
+      const imageX = (screenX - translateX.value) / scale.value
+      const imageY = (screenY - translateY.value) / scale.value
+      
+      // Clamp to image bounds
+      const clampedX = Math.max(0, Math.min(imageWidth.value, imageX))
+      const clampedY = Math.max(0, Math.min(imageHeight.value, imageY))
+      
+      // Add point to current polygon (store screen coordinates for display, image coordinates for saving)
+      currentFogPolygon.value.push({
+        screenX: screenX,
+        screenY: screenY,
+        imageX: clampedX,
+        imageY: clampedY
+      })
+      
+      isDrawingFog.value = true
+    }
+
+    const handleFogMouseMove = (e) => {
+      // Preview could be shown here
+    }
+
+    const handleFogMouseUp = (e) => {
+      // Nothing needed here
+    }
+
+    const finishFogPolygon = async () => {
+      if (currentFogPolygon.value.length < 3) {
+        // Need at least 3 points for a polygon
+        alert('Fog of war requires at least 3 points. Add more points by clicking on the map.')
+        return
+      }
+      
+      // Convert current polygon to image coordinates
+      const fogPolygon = {
+        type: 'polygon',
+        points: currentFogPolygon.value.map(p => [p.imageX, p.imageY])
+      }
+      
+      // Add to fog of war array
+      const updatedFog = [...(props.fogOfWar || []), fogPolygon]
+      
+      // Save to backend
+      if (props.mapId) {
+        try {
+          await api.put(`/maps/${props.mapId}/fog-of-war`, {
+            fog_of_war: updatedFog
+          })
+          emit('fog-of-war-updated', updatedFog)
+        } catch (err) {
+          console.error('Error saving fog of war:', err)
+          alert(err.response?.data?.error || 'Failed to save fog of war')
+        }
+      }
+      
+      // Reset
+      currentFogPolygon.value = []
+      fogDrawMode.value = null
+      isDrawingFog.value = false
+    }
+
+    const cancelFogDrawing = () => {
+      currentFogPolygon.value = []
+      fogDrawMode.value = null
+      isDrawingFog.value = false
+    }
+
+    const toggleFogDrawMode = () => {
+      if (fogDrawMode.value === 'draw') {
+        fogDrawMode.value = null
+        cancelFogDrawing()
+      } else {
+        fogDrawMode.value = 'draw'
+        currentFogPolygon.value = []
+        isDrawingFog.value = false
+      }
+    }
+
+    const deleteFog = async (index) => {
+      if (!props.mapId) return
+      
+      const updatedFog = [...(props.fogOfWar || [])]
+      updatedFog.splice(index, 1)
+      
+      try {
+        await api.put(`/maps/${props.mapId}/fog-of-war`, {
+          fog_of_war: updatedFog
+        })
+        emit('fog-of-war-updated', updatedFog)
+      } catch (err) {
+        console.error('Error deleting fog of war:', err)
+        alert(err.response?.data?.error || 'Failed to delete fog of war')
+      }
+    }
+
+    // Handle keyboard events for fog drawing
+    const handleKeyDown = (e) => {
+      if (fogDrawMode.value === 'draw' && e.key === 'Enter') {
+        e.preventDefault()
+        finishFogPolygon()
+      } else if (fogDrawMode.value === 'draw' && e.key === 'Escape') {
+        e.preventDefault()
+        cancelFogDrawing()
+      }
+    }
     
+    const handlePawnClick = (e, pawn) => {
+      if (props.initiativeMode) {
+        e.preventDefault()
+        e.stopPropagation()
+        emit('pawn-clicked', pawn)
+        return
+      }
+    }
+
     const handlePawnMouseDown = (e, pawn) => {
+      if (props.initiativeMode) {
+        handlePawnClick(e, pawn)
+        return
+      }
       // Check if user can move this pawn
       if (!props.isDm && pawn.owned_by !== props.currentUserId) {
         return
@@ -651,9 +1144,10 @@ export default {
       const clampedX = Math.max(0, Math.min(imageWidth.value, imageX))
       const clampedY = Math.max(0, Math.min(imageHeight.value, imageY))
       
-      // Update local state immediately for smooth dragging
+      // Update local state immediately for smooth dragging (NO database call)
       const pawn = pawns.value.find(p => p.id === draggingPawnId.value)
       if (pawn) {
+        // Direct mutation for instant update - no reactivity overhead
         pawn.x_position = clampedX
         pawn.y_position = clampedY
       }
@@ -662,9 +1156,18 @@ export default {
     const handlePawnMouseUp = async () => {
       if (!draggingPawnId.value) return
       
-      const pawn = pawns.value.find(p => p.id === draggingPawnId.value)
+      // IMMEDIATELY stop dragging and remove listeners to prevent any further movement
+      const pawnId = draggingPawnId.value
+      const pawn = pawns.value.find(p => p.id === pawnId)
+      
+      // Clear dragging state IMMEDIATELY before any async operations
+      draggingPawnId.value = null
+      dragPawnStart.value = { x: 0, y: 0 }
+      document.removeEventListener('mousemove', handlePawnMouseMove)
+      document.removeEventListener('mouseup', handlePawnMouseUp)
+      
+      // Now save to database (async, but dragging is already stopped)
       if (pawn) {
-        // Save position to server
         try {
           await api.put(`/pawns/${pawn.id}`, {
             x_position: pawn.x_position,
@@ -673,18 +1176,22 @@ export default {
           emit('pawn-moved', pawn)
         } catch (err) {
           console.error('Error updating pawn position:', err)
-          // Reload pawns to get correct position
+          // Reload pawns to get correct position only if there was an error
           await loadPawns()
         }
       }
       
-      draggingPawnId.value = null
-      dragPawnStart.value = { x: 0, y: 0 }
-      document.removeEventListener('mousemove', handlePawnMouseMove)
-      document.removeEventListener('mouseup', handlePawnMouseUp)
+      // Reload pawns after drop to sync with other users (if needed)
+      setTimeout(() => {
+        loadPawns()
+      }, 100)
     }
     
     const handlePawnTouchStart = (e, pawn) => {
+      if (props.initiativeMode) {
+        handlePawnClick(e, pawn)
+        return
+      }
       if (!props.isDm && pawn.owned_by !== props.currentUserId) {
         return
       }
@@ -727,6 +1234,7 @@ export default {
       const clampedX = Math.max(0, Math.min(imageWidth.value, imageX))
       const clampedY = Math.max(0, Math.min(imageHeight.value, imageY))
       
+      // Update local state immediately for smooth dragging (NO database call)
       const pawn = pawns.value.find(p => p.id === draggingPawnId.value)
       if (pawn) {
         pawn.x_position = clampedX
@@ -737,7 +1245,17 @@ export default {
     const handlePawnTouchEnd = async () => {
       if (!draggingPawnId.value) return
       
-      const pawn = pawns.value.find(p => p.id === draggingPawnId.value)
+      // IMMEDIATELY stop dragging and remove listeners to prevent any further movement
+      const pawnId = draggingPawnId.value
+      const pawn = pawns.value.find(p => p.id === pawnId)
+      
+      // Clear dragging state IMMEDIATELY before any async operations
+      draggingPawnId.value = null
+      dragPawnStart.value = { x: 0, y: 0 }
+      document.removeEventListener('touchmove', handlePawnTouchMove)
+      document.removeEventListener('touchend', handlePawnTouchEnd)
+      
+      // Now save to database (async, but dragging is already stopped)
       if (pawn) {
         try {
           await api.put(`/pawns/${pawn.id}`, {
@@ -747,14 +1265,15 @@ export default {
           emit('pawn-moved', pawn)
         } catch (err) {
           console.error('Error updating pawn position:', err)
+          // Reload pawns to get correct position only if there was an error
           await loadPawns()
         }
       }
       
-      draggingPawnId.value = null
-      dragPawnStart.value = { x: 0, y: 0 }
-      document.removeEventListener('touchmove', handlePawnTouchMove)
-      document.removeEventListener('touchend', handlePawnTouchEnd)
+      // Reload pawns after drop to sync with other users (if needed)
+      setTimeout(() => {
+        loadPawns()
+      }, 100)
     }
     
     const createPawn = async () => {
@@ -781,15 +1300,17 @@ export default {
         const { data } = await api.post(`/sessions/${props.sessionId}/pawns`, {
           name: newPawn.value.name,
           color: newPawn.value.color,
+          status_color: newPawn.value.status_color || null,
           x_position: centerX, // Image pixel coordinate
           y_position: centerY, // Image pixel coordinate
           owned_by: newPawn.value.owned_by || null,
           hp: hp,
-          max_hp: newPawn.value.max_hp || null
+          max_hp: newPawn.value.max_hp || null,
+          visible: newPawn.value.visible !== false // Default to true if not set
         })
         
         showCreatePawnModal.value = false
-        newPawn.value = { name: '', color: '#667eea', owned_by: null, max_hp: null }
+        newPawn.value = { name: '', color: '#667eea', status_color: null, owned_by: null, max_hp: null, visible: true }
         await loadPawns()
         emit('pawn-created', data.pawn)
       } catch (err) {
@@ -849,6 +1370,114 @@ export default {
       }
     }
 
+    const editPawn = (pawn) => {
+      if (!props.isDm) {
+        return
+      }
+      pawnToEdit.value = pawn
+      editingPawn.value = {
+        name: pawn.name || '',
+        color: (pawn.color && pawn.color.trim() !== '') ? pawn.color : '#667eea',
+        status_color: pawn.status_color || null,
+        owned_by: pawn.owned_by || null,
+        hp: pawn.hp !== null && pawn.hp !== undefined ? pawn.hp : null,
+        max_hp: pawn.max_hp !== null && pawn.max_hp !== undefined ? pawn.max_hp : null,
+        visible: pawn.visible !== false // Default to true if not set
+      }
+    }
+
+    const handleStatusColorClick = (e, pawn) => {
+      // Prevent pawn dragging when clicking status color
+      e.stopPropagation()
+      e.preventDefault()
+      editPawnStatusColor(pawn)
+    }
+
+    const editPawnStatusColor = (pawn) => {
+      // Allow players to edit their own pawn's status color, or DM to edit any pawn
+      if (!props.isDm && pawn.owned_by !== props.currentUserId) {
+        return
+      }
+      pawnToEdit.value = pawn
+      editingPawn.value = {
+        name: pawn.name || '',
+        color: (pawn.color && pawn.color.trim() !== '') ? pawn.color : '#667eea',
+        status_color: pawn.status_color || null,
+        owned_by: pawn.owned_by || null,
+        hp: pawn.hp !== null && pawn.hp !== undefined ? pawn.hp : null,
+        max_hp: pawn.max_hp !== null && pawn.max_hp !== undefined ? pawn.max_hp : null,
+        visible: pawn.visible !== false
+      }
+    }
+
+    const selectStatusColor = async (colorValue) => {
+      if (!pawnToEdit.value) {
+        return
+      }
+
+      updatingPawn.value = true
+
+      try {
+        // Update status_color immediately
+        const updatePayload = {
+          status_color: colorValue || null
+        }
+        
+        // Only DM can update other fields (if they were editing)
+        if (props.isDm && editingPawn.value.name) {
+          updatePayload.name = editingPawn.value.name
+          updatePayload.color = editingPawn.value.color
+          updatePayload.owned_by = editingPawn.value.owned_by || null
+          updatePayload.hp = editingPawn.value.hp !== null && editingPawn.value.hp !== undefined ? editingPawn.value.hp : null
+          updatePayload.max_hp = editingPawn.value.max_hp !== null && editingPawn.value.max_hp !== undefined ? editingPawn.value.max_hp : null
+          updatePayload.visible = editingPawn.value.visible !== false
+        }
+        
+        await api.put(`/pawns/${pawnToEdit.value.id}`, updatePayload)
+        await loadPawns()
+        pawnToEdit.value = null
+      } catch (err) {
+        console.error('Error updating pawn status color:', err)
+        alert(err.response?.data?.error || 'Failed to update status color')
+      } finally {
+        updatingPawn.value = false
+      }
+    }
+
+    const savePawnEdit = async () => {
+      if (!pawnToEdit.value) {
+        return
+      }
+
+      updatingPawn.value = true
+
+      try {
+        // Build update payload based on user role
+        const updatePayload = {
+          status_color: editingPawn.value.status_color || null
+        }
+        
+        // Only DM can update other fields
+        if (props.isDm) {
+          updatePayload.name = editingPawn.value.name
+          updatePayload.color = editingPawn.value.color
+          updatePayload.owned_by = editingPawn.value.owned_by || null
+          updatePayload.hp = editingPawn.value.hp !== null && editingPawn.value.hp !== undefined ? editingPawn.value.hp : null
+          updatePayload.max_hp = editingPawn.value.max_hp !== null && editingPawn.value.max_hp !== undefined ? editingPawn.value.max_hp : null
+          updatePayload.visible = editingPawn.value.visible !== false
+        }
+        
+        await api.put(`/pawns/${pawnToEdit.value.id}`, updatePayload)
+        await loadPawns()
+        pawnToEdit.value = null
+      } catch (err) {
+        console.error('Error updating pawn:', err)
+        alert(err.response?.data?.error || 'Failed to update pawn')
+      } finally {
+        updatingPawn.value = false
+      }
+    }
+
     const editPawnHp = (pawn) => {
       if (!props.isDm) {
         return
@@ -886,6 +1515,7 @@ export default {
     onMounted(async () => {
       updateContainerSize()
       window.addEventListener('resize', updateContainerSize)
+      window.addEventListener('keydown', handleKeyDown)
       
       // Only load pawns if sessionId is provided
       if (props.sessionId) {
@@ -904,9 +1534,9 @@ export default {
             }, { once: true })
           }
           
-          // Poll for pawn updates every 2 seconds
+          // Poll for pawn updates every 2 seconds (but skip if dragging)
           pawnsPollInterval = setInterval(() => {
-            if (imageWidth.value > 0 && imageHeight.value > 0) {
+            if (imageWidth.value > 0 && imageHeight.value > 0 && !draggingPawnId.value) {
               loadPawns()
             }
           }, 2000)
@@ -918,6 +1548,7 @@ export default {
     
     onUnmounted(() => {
       window.removeEventListener('resize', updateContainerSize)
+      window.removeEventListener('keydown', handleKeyDown)
       if (pawnsPollInterval) {
         clearInterval(pawnsPollInterval)
       }
@@ -925,6 +1556,10 @@ export default {
       document.removeEventListener('mouseup', handlePawnMouseUp)
       document.removeEventListener('touchmove', handlePawnTouchMove)
       document.removeEventListener('touchend', handlePawnTouchEnd)
+      document.removeEventListener('mousemove', handleMouseMove)
+      document.removeEventListener('mouseup', handleMouseUp)
+      document.removeEventListener('touchmove', handleTouchMove)
+      document.removeEventListener('touchend', handleTouchEnd)
     })
     
     return {
@@ -943,6 +1578,7 @@ export default {
       handleMouseDown,
       handleMouseMove,
       handleMouseUp,
+      isDragging,
       handleTouchStart,
       handleTouchMove,
       handleTouchEnd,
@@ -951,6 +1587,8 @@ export default {
       getPawnInitial,
       handlePawnMouseDown,
       handlePawnTouchStart,
+      handlePawnClick,
+      initiativeMode: props.initiativeMode,
       showCreatePawnModal,
       newPawn,
       creatingPawn,
@@ -968,7 +1606,32 @@ export default {
       editPawnHp,
       savePawnHp,
       sessionMembers,
-      draggingPawnId
+      draggingPawnId,
+      visiblePawns,
+      editPawn,
+      editPawnStatusColor,
+      handleStatusColorClick,
+      selectStatusColor,
+      statusColorOptions,
+      pawnToEdit,
+      editingPawn,
+      savePawnEdit,
+      updatingPawn,
+      fogDrawMode,
+      highlightedPawnId,
+      currentFogPolygon,
+      fogOverlayStyle,
+      fogDrawingOverlayStyle,
+      getFogPolygonPoints,
+      getCurrentFogPolygonPoints,
+      handleFogMouseDown,
+      handleFogMouseMove,
+      handleFogMouseUp,
+      finishFogPolygon,
+      cancelFogDrawing,
+      toggleFogDrawMode,
+      deleteFog,
+      handleKeyDown
     }
   }
 }
@@ -991,13 +1654,14 @@ export default {
   position: absolute;
   top: 8px;
   right: 8px;
-  z-index: 10;
+  z-index: 300; /* Above fog overlays (250-251) */
   display: flex;
   gap: 6px;
   align-items: center;
   background: rgba(0, 0, 0, 0.7);
   padding: 6px;
   border-radius: 6px;
+  pointer-events: auto; /* Ensure controls are clickable */
   backdrop-filter: blur(10px);
 }
 
@@ -1056,8 +1720,19 @@ export default {
   top: 0;
   left: 0;
   pointer-events: none;
-  transition: transform 0.1s ease-out;
   will-change: transform;
+}
+
+.map-viewer.map-dragging .map-image-wrapper {
+  transition: none;
+}
+
+.map-viewer.fog-mode-active {
+  cursor: default;
+}
+
+.map-viewer.fog-mode-active.map-dragging {
+  cursor: default;
 }
 
 .map-image {
@@ -1090,13 +1765,14 @@ export default {
   pointer-events: auto;
   cursor: move;
   z-index: 100;
-  transition: left 0.05s linear, top 0.05s linear;
   will-change: left, top;
+  transition: left 0.05s linear, top 0.05s linear;
 }
 
 .pawn-dragging {
   z-index: 200;
   cursor: grabbing;
+  transition: none !important;
 }
 
 .pawn-circle {
@@ -1110,6 +1786,82 @@ export default {
   justify-content: center;
   margin: 0 auto;
   transition: all 0.2s ease;
+  position: relative;
+}
+
+.pawn-status-color {
+  position: absolute;
+  top: -4px;
+  left: -4px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid white;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.pawn-status-color-empty {
+  background: rgba(255, 255, 255, 0.3) !important;
+  border-style: dashed;
+}
+
+.pawn-status-color-clickable {
+  cursor: pointer;
+  transition: transform 0.2s ease;
+}
+
+.pawn-status-color-clickable:hover {
+  transform: scale(1.2);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+}
+
+.status-color-add-icon {
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 12px;
+  font-weight: bold;
+  line-height: 1;
+}
+
+.status-color-selector {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.status-color-option {
+  width: 40px;
+  height: 40px;
+  border: 2px solid #ccc;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  position: relative;
+}
+
+.status-color-option:hover {
+  transform: scale(1.1);
+  border-color: #667eea;
+}
+
+.status-color-option.active {
+  border-color: #667eea;
+  border-width: 3px;
+  box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.3);
+}
+
+.status-color-none {
+  color: #666;
+  font-size: 24px;
+  font-weight: bold;
+  line-height: 1;
 }
 
 .pawn-owned .pawn-circle {
@@ -1119,6 +1871,39 @@ export default {
 
 .pawn-dm-control .pawn-circle {
   border-color: #28a745;
+}
+
+.pawn-invisible .pawn-circle {
+  opacity: 0.5;
+  border-style: dashed;
+}
+
+.pawn-invisible .pawn-label {
+  opacity: 0.7;
+}
+
+.pawn-highlighted .pawn-circle {
+  border: 4px solid #667eea !important;
+  box-shadow: 0 0 0 6px rgba(102, 126, 234, 0.5), 0 0 20px rgba(102, 126, 234, 0.8), 0 8px 24px rgba(102, 126, 234, 0.6) !important;
+  animation: highlight-pulse 1.5s ease-in-out infinite;
+  transform: scale(1.15);
+}
+
+.pawn-highlighted .pawn-label {
+  background: rgba(102, 126, 234, 0.9) !important;
+  border: 2px solid #667eea;
+  font-weight: 700;
+}
+
+@keyframes highlight-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 6px rgba(102, 126, 234, 0.5), 0 0 20px rgba(102, 126, 234, 0.8), 0 8px 24px rgba(102, 126, 234, 0.6);
+    transform: scale(1.15);
+  }
+  50% {
+    box-shadow: 0 0 0 8px rgba(102, 126, 234, 0.6), 0 0 30px rgba(102, 126, 234, 1), 0 10px 30px rgba(102, 126, 234, 0.8);
+    transform: scale(1.2);
+  }
 }
 
 .pawn:hover .pawn-circle {
@@ -1168,6 +1953,35 @@ export default {
   transform: scale(1.05);
 }
 
+.pawn-edit-btn {
+  position: absolute;
+  bottom: 20px;
+  left: -8px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #667eea;
+  color: white;
+  border: 2px solid white;
+  font-size: 12px;
+  font-weight: bold;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  padding: 0;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  transition: all 0.2s ease;
+  z-index: 10;
+}
+
+.pawn-edit-btn:hover:not(:disabled) {
+  background: #5568d3;
+  transform: scale(1.1);
+  box-shadow: 0 3px 6px rgba(0, 0, 0, 0.3);
+}
+
 .pawn-delete-btn {
   position: absolute;
   top: -8px;
@@ -1208,6 +2022,8 @@ export default {
   right: 8px;
   width: 40px;
   height: 40px;
+  z-index: 300; /* Above fog overlays (250-251) */
+  pointer-events: auto; /* Ensure button is clickable */
   border: none;
   background: #667eea;
   color: white;
@@ -1216,7 +2032,8 @@ export default {
   font-weight: bold;
   cursor: pointer;
   box-shadow: 0 2px 8px rgba(102, 126, 234, 0.4);
-  z-index: 20;
+  z-index: 300; /* Above fog overlays (250-251) */
+  pointer-events: auto; /* Ensure button is clickable */
   transition: all 0.2s ease;
 }
 
@@ -1224,6 +2041,87 @@ export default {
   background: #5568d3;
   transform: scale(1.1);
   box-shadow: 0 6px 16px rgba(102, 126, 234, 0.5);
+}
+
+/* Fog of War Styles */
+.fog-controls {
+  display: flex;
+  gap: 4px;
+  margin-left: 8px;
+  padding-left: 8px;
+  border-left: 1px solid rgba(255, 255, 255, 0.3);
+}
+
+.fog-btn {
+  font-size: 16px;
+  padding: 0;
+}
+
+.fog-btn.active {
+  background: rgba(102, 126, 234, 0.5);
+  border: 2px solid #667eea;
+}
+
+.fog-of-war-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+  z-index: 250; /* Above pawns (100) and dragging pawns (200) */
+}
+
+.fog-drawing-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: auto;
+  z-index: 251; /* Above fog overlay */
+  cursor: crosshair;
+}
+
+.fog-dm-view {
+  fill: rgba(0, 0, 0, 0.5);
+  stroke: rgba(0, 0, 0, 0.7);
+  stroke-width: 2;
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.fog-player-view {
+  fill: rgba(0, 0, 0, 1);
+  stroke: rgba(0, 0, 0, 1);
+  stroke-width: 2;
+  pointer-events: none;
+}
+
+.fog-preview {
+  fill: rgba(0, 0, 0, 0.2);
+  stroke: rgba(102, 126, 234, 0.8);
+  stroke-width: 2;
+  stroke-dasharray: 5, 5;
+  pointer-events: none;
+}
+
+.fog-preview-line {
+  stroke: rgba(102, 126, 234, 0.8);
+  stroke-width: 2;
+  stroke-dasharray: 5, 5;
+  pointer-events: none;
+}
+
+.fog-point-marker {
+  fill: #667eea;
+  stroke: white;
+  stroke-width: 2;
+  pointer-events: none;
+}
+
+.fog-instruction-text {
+  fill: #667eea;
+  font-size: 12px;
+  font-weight: bold;
+  text-shadow: 0 0 3px white;
+  pointer-events: none;
 }
 
 .modal-overlay {

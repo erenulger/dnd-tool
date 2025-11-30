@@ -77,14 +77,14 @@
             </div>
           </div>
           <div class="session-actions">
+            <button @click="rollD20" class="btn btn-dice" title="Roll d20">
+              🎲
+            </button>
             <button @click="showDndSearch = true" class="btn btn-primary">
               📚 D&D Reference
             </button>
             <button @click="showManageMembers = true" class="btn btn-primary">
               ⚙️ Manage Session
-            </button>
-            <button @click="showManageQuotes = true" class="btn btn-primary">
-              💬 Manage Quotes
             </button>
           </div>
         </div>
@@ -146,15 +146,25 @@
         <div class="card" id="area-map-section">
           <div class="map-section-header">
             <h2 class="area-map-title" @click="scrollToMap">Area Map</h2>
-            <!-- DM Upload Button -->
-            <button 
-              v-if="session.is_dm" 
-              @click="triggerFileInput"
-              class="btn btn-primary upload-map-btn"
-              :disabled="uploading"
-            >
-              {{ uploading ? `Uploading... ${uploadProgress}%` : '📤 Upload Map' }}
-            </button>
+            <div class="map-section-actions">
+              <!-- Initiative Table Button -->
+              <button 
+                v-if="session.is_dm" 
+                @click="showCreateInitiative = true" 
+                class="btn btn-primary"
+              >
+                ⚡ Initiative Table
+              </button>
+              <!-- DM Upload Button -->
+              <button 
+                v-if="session.is_dm" 
+                @click="triggerFileInput"
+                class="btn btn-primary upload-map-btn"
+                :disabled="uploading"
+              >
+                {{ uploading ? `Uploading... ${uploadProgress}%` : '📤 Upload Map' }}
+              </button>
+            </div>
           </div>
           
           <input
@@ -167,20 +177,74 @@
           />
 
           <!-- Map Display -->
-          <div v-if="currentMap" class="map-container">
+          <div v-if="currentMap || (session.is_dm && unsharedMap)" class="map-container">
             <MapViewer 
-              v-if="session && currentMap"
-              :map-url="getMapUrl(currentMap.file_path)"
-              :map-name="currentMap.original_filename"
+              v-if="session && (currentMap || unsharedMap)"
+              :map-url="getMapUrl((currentMap || unsharedMap).file_path)"
+              :map-name="(currentMap || unsharedMap).original_filename"
               :session-id="sessionId"
               :is-dm="session.is_dm"
               :current-user-id="session.user_id || ''"
+              :map-id="(currentMap || unsharedMap).id"
+              :fog-of-war="getFogOfWar((currentMap || unsharedMap))"
+              :highlighted-pawn-id="currentInitiativePawnId"
+              :initiative-mode="showCreateInitiative"
               @enemy-status-changed="loadEnemyStats"
+              @fog-of-war-updated="handleFogOfWarUpdated"
+              @pawn-clicked="handlePawnClickForInitiative"
             />
-            <p class="map-info">
-              {{ currentMap.original_filename }} 
-              <span v-if="session.is_dm">• Uploaded {{ formatDate(currentMap.uploaded_at) }}</span>
-            </p>
+            
+            <!-- Initiative Table Overlay -->
+            <div v-if="initiativeTable.length > 0" class="initiative-overlay">
+              <div class="initiative-widget-small">
+                <div class="initiative-widget-header-small">
+                  <span class="initiative-title-small">⚡ Initiative</span>
+                </div>
+                <div class="initiative-list-small">
+                  <div 
+                    v-for="(entry, index) in initiativeTable" 
+                    :key="entry.pawnId"
+                    :class="['initiative-item-small', { 'active': currentInitiativePawnId === entry.pawnId }]"
+                    @click="setCurrentInitiativePawn(entry.pawnId)"
+                  >
+                    <span class="initiative-rank-small">{{ index + 1 }}.</span>
+                    <span class="initiative-name-small">{{ entry.pawnName }}</span>
+                    <span class="initiative-value-small">{{ Math.floor(entry.initiative) }}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            
+            <div class="map-info-container">
+              <p class="map-info">
+                {{ (currentMap || unsharedMap).original_filename }} 
+                <span v-if="session.is_dm">• Uploaded {{ formatDate((currentMap || unsharedMap).uploaded_at) }}</span>
+              </p>
+              <div v-if="session.is_dm && (currentMap || unsharedMap)" class="map-share-controls">
+                <span v-if="(currentMap || unsharedMap).shared === false" class="map-status-badge map-status-draft">
+                  🔒 Draft (Not Shared)
+                </span>
+                <span v-else class="map-status-badge map-status-shared">
+                  ✅ Shared with Players
+                </span>
+                <button 
+                  v-if="(currentMap || unsharedMap).shared === false && (currentMap || unsharedMap).id"
+                  @click="shareMap((currentMap || unsharedMap).id)"
+                  class="btn btn-primary btn-small share-map-btn"
+                  :disabled="sharingMap"
+                >
+                  {{ sharingMap ? 'Sharing...' : '📤 Share with Players' }}
+                </button>
+                <button 
+                  v-else-if="(currentMap || unsharedMap).id"
+                  @click="unshareMap((currentMap || unsharedMap).id)"
+                  class="btn btn-secondary btn-small share-map-btn"
+                  :disabled="sharingMap"
+                >
+                  {{ sharingMap ? 'Updating...' : '🔒 Unshare' }}
+                </button>
+              </div>
+            </div>
           </div>
 
           <div v-else class="no-map">
@@ -205,8 +269,6 @@
             v-for="note in personalNotes" 
             :key="note.id"
             class="note-item-apple"
-            :class="`note-color-${note.background_color || 'default'}`"
-            :style="getNoteStyle(note.background_color)"
           >
             <div class="note-content-wrapper">
               <div v-if="note.title" class="note-title-apple">{{ note.title }}</div>
@@ -240,19 +302,6 @@
             @keydown.ctrl.enter="addPersonalNote"
             @keydown.meta.enter="addPersonalNote"
           ></textarea>
-          <div class="note-color-selector">
-            <label>Background Color:</label>
-            <div class="color-options">
-              <button
-                v-for="color in (isDarkTheme ? darkNoteColors : noteColors)"
-                :key="color.value"
-                @click="newPersonalNoteColor = color.value"
-                :class="['color-option', { 'selected': newPersonalNoteColor === color.value }]"
-                :style="{ backgroundColor: color.bg, borderColor: newPersonalNoteColor === color.value ? '#667eea' : 'transparent' }"
-                :title="color.name"
-              ></button>
-            </div>
-          </div>
           <button 
             @click="addPersonalNote" 
             class="note-add-btn-apple"
@@ -278,8 +327,6 @@
             v-for="note in sharedNotes" 
             :key="note.id"
             class="note-item-apple"
-            :class="`note-color-${note.background_color || 'default'}`"
-            :style="getNoteStyle(note.background_color)"
           >
             <div class="note-content-wrapper">
               <div v-if="note.title" class="note-title-apple">{{ note.title }}</div>
@@ -313,19 +360,6 @@
             @keydown.ctrl.enter="addSharedNote"
             @keydown.meta.enter="addSharedNote"
           ></textarea>
-          <div class="note-color-selector">
-            <label>Background Color:</label>
-            <div class="color-options">
-              <button
-                v-for="color in (isDarkTheme ? darkNoteColors : noteColors)"
-                :key="color.value"
-                @click="newSharedNoteColor = color.value"
-                :class="['color-option', { 'selected': newSharedNoteColor === color.value }]"
-                :style="{ backgroundColor: color.bg, borderColor: newSharedNoteColor === color.value ? '#667eea' : 'transparent' }"
-                :title="color.name"
-              ></button>
-            </div>
-          </div>
           <button 
             @click="addSharedNote" 
             class="note-add-btn-apple"
@@ -574,6 +608,74 @@
           </div>
   </div>
 
+  <!-- Dice Result Modal -->
+  <div v-if="showDiceResult" class="modal-overlay dice-result-overlay" @click.self="showDiceResult = false">
+    <div class="modal-content dice-result-modal" @click.stop>
+      <div class="dice-result-content">
+        <div class="dice-icon">🎲</div>
+        <div class="dice-result-value">{{ diceResult }}</div>
+        <div class="dice-result-label">d20 Roll</div>
+        <div class="dice-result-crit" v-if="diceResult === 20">🎉 Critical Success!</div>
+        <div class="dice-result-fail" v-if="diceResult === 1">💀 Critical Failure!</div>
+      </div>
+      <div class="modal-actions">
+        <button @click="showDiceResult = false" class="btn btn-primary">
+          Close
+        </button>
+        <button @click="rollD20(); showDiceResult = true" class="btn btn-secondary">
+          Roll Again
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Initiative Input Popup -->
+  <div v-if="initiativeInputPawn && showCreateInitiative" class="modal-overlay initiative-input-overlay" @click.self="closeInitiativeInput">
+    <div class="modal-content initiative-input-modal" @click.stop>
+      <div class="modal-header">
+        <h3>Set Initiative for {{ initiativeInputPawn.name }}</h3>
+        <button @click="closeInitiativeInput" class="modal-close-btn">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label>Initiative Value</label>
+          <input 
+            type="number" 
+            step="0.1"
+            v-model.number="tempInitiativeValue"
+            placeholder="Enter initiative"
+            class="initiative-input-field"
+            @keyup.enter="saveInitiativeValue"
+            autofocus
+          />
+        </div>
+        <div class="modal-actions">
+          <button @click="closeInitiativeInput" class="btn btn-secondary">
+            Cancel
+          </button>
+          <button @click="saveInitiativeValue" class="btn btn-primary">
+            Done
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Initiative Table Creation Controls -->
+  <div v-if="showCreateInitiative" class="initiative-creation-banner">
+    <div class="initiative-creation-content">
+      <span class="initiative-creation-text">⚡ Click on pawns on the map to set their initiative values</span>
+      <div class="initiative-creation-actions">
+        <button @click="showCreateInitiative = false" class="btn btn-secondary btn-small">
+          Cancel
+        </button>
+        <button @click="createInitiativeTable" class="btn btn-primary btn-small" :disabled="creatingInitiative || Object.keys(initiativeValues).length === 0">
+          {{ creatingInitiative ? 'Creating...' : 'Create Table' }}
+        </button>
+      </div>
+    </div>
+  </div>
+
   <!-- Manage Session Modal -->
   <div v-if="showManageMembers" class="modal-overlay" @click.self="showManageMembers = false">
           <div class="modal-content members-modal">
@@ -691,7 +793,7 @@
 <script>
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import api from '../lib/api'
+import api, { getApiUrl } from '../lib/api'
 import { supabase } from '../lib/supabase'
 import MapViewer from '../components/MapViewer.vue'
 
@@ -706,11 +808,13 @@ export default {
     const sessionId = route.params.id
     const session = ref(null)
     const currentMap = ref(null)
+    const unsharedMap = ref(null) // For DM to see unshared maps
     const loading = ref(true)
     const error = ref('')
     const uploading = ref(false)
     const uploadProgress = ref(0)
     const fileInput = ref(null)
+    const sharingMap = ref(false)
     const inviteEmail = ref('')
     const inviting = ref(false)
     const inviteError = ref('')
@@ -718,6 +822,16 @@ export default {
     const showManageMembers = ref(false)
     const showManageQuotes = ref(false)
     const showManageEnemies = ref(false)
+    const showCreateInitiative = ref(false)
+    const allPawns = ref([])
+    const initiativeValues = ref({})
+    const initiativeTable = ref([])
+    const creatingInitiative = ref(false)
+    const currentInitiativePawnId = ref(null)
+    const diceResult = ref(null)
+    const showDiceResult = ref(false)
+    const initiativeInputPawn = ref(null)
+    const tempInitiativeValue = ref(null)
     const quotes = ref([])
     const deletingQuoteId = ref(null)
     const quoteToDelete = ref(null)
@@ -726,46 +840,9 @@ export default {
     const sharedNotes = ref([])
     const newPersonalNote = ref('')
     const newPersonalNoteTitle = ref('')
-    const newPersonalNoteColor = ref('default')
     const newSharedNote = ref('')
     const newSharedNoteTitle = ref('')
-    const newSharedNoteColor = ref('default')
     
-    const noteColors = [
-      { value: 'default', name: 'Default', bg: '#ffffff', text: '#000000' },
-      { value: 'yellow', name: 'Yellow', bg: '#fef3c7', text: '#78350f' },
-      { value: 'green', name: 'Green', bg: '#d1fae5', text: '#065f46' },
-      { value: 'blue', name: 'Blue', bg: '#dbeafe', text: '#1e3a8a' },
-      { value: 'pink', name: 'Pink', bg: '#fce7f3', text: '#831843' },
-      { value: 'purple', name: 'Purple', bg: '#e9d5ff', text: '#581c87' },
-      { value: 'orange', name: 'Orange', bg: '#fed7aa', text: '#7c2d12' }
-    ]
-    
-    const darkNoteColors = [
-      { value: 'default', name: 'Default', bg: '#2d2d2f', text: '#f5f5f7' },
-      { value: 'yellow', name: 'Yellow', bg: '#4a3d1f', text: '#fef3c7' },
-      { value: 'green', name: 'Green', bg: '#1a3a2e', text: '#d1fae5' },
-      { value: 'blue', name: 'Blue', bg: '#1e2a3a', text: '#dbeafe' },
-      { value: 'pink', name: 'Pink', bg: '#3a1a2a', text: '#fce7f3' },
-      { value: 'purple', name: 'Purple', bg: '#2a1a3a', text: '#e9d5ff' },
-      { value: 'orange', name: 'Orange', bg: '#3a2a1a', text: '#fed7aa' }
-    ]
-    
-    const getNoteStyle = (color) => {
-      if (!color || color === 'default') return {}
-      
-      const colors = isDarkTheme.value ? darkNoteColors : noteColors
-      const colorObj = colors.find(c => c.value === color) || colors[0]
-      
-      return {
-        backgroundColor: colorObj.bg,
-        color: colorObj.text
-      }
-    }
-    
-    const isDarkTheme = computed(() => {
-      return document.documentElement.classList.contains('dark-theme')
-    })
     const addingPersonalNote = ref(false)
     const addingSharedNote = ref(false)
     const deletingPersonalNoteId = ref(null)
@@ -856,7 +933,13 @@ export default {
           if (currentUserId.value) {
             session.value.user_id = currentUserId.value
           }
-          currentMap.value = data.session.current_map
+          // Don't set currentMap from session data - use loadMap() which properly filters
+          // This prevents security leak where unshared maps briefly show to players
+          // Only reset if we're not in the middle of an upload operation
+          if (!uploading.value) {
+            currentMap.value = null
+            unsharedMap.value = null
+          }
         } else {
           throw new Error('Invalid session data received')
         }
@@ -875,9 +958,46 @@ export default {
     const loadMap = async () => {
       try {
         const { data } = await api.get(`/sessions/${sessionId}/map`)
+        
+        // If DM, check if we have an unshared map that should be preserved
+        if (session.value?.is_dm && unsharedMap.value && !data.map) {
+          // Keep the unshared map if we have one and no shared map exists
+          currentMap.value = null
+          return
+        }
+        
         currentMap.value = data.map
+        
+        // If DM and no shared map, try to load unshared map
+        if (session.value?.is_dm && !currentMap.value) {
+          await loadUnsharedMap()
+        } else {
+          // Only clear unshared map if we have a shared map
+          if (currentMap.value) {
+            unsharedMap.value = null
+          }
+        }
       } catch (err) {
         console.error('Failed to load map:', err)
+      }
+    }
+
+    const loadUnsharedMap = async () => {
+      try {
+        // Get all maps for this session to find unshared one
+        const { data: sessionData } = await api.get(`/sessions/${sessionId}`)
+        if (sessionData?.session?.current_map_id) {
+          // We'll get the map from session data if it exists
+          // The backend will return it for DM even if not shared
+          const { data: mapData } = await api.get(`/sessions/${sessionId}/map`)
+          if (mapData?.map && !mapData.map.shared) {
+            unsharedMap.value = mapData.map
+          } else {
+            unsharedMap.value = null
+          }
+        }
+      } catch (err) {
+        console.error('Failed to load unshared map:', err)
       }
     }
 
@@ -921,11 +1041,32 @@ export default {
           }
         )
 
-        currentMap.value = data.map
         uploadProgress.value = 100
         
-        // Reload session to get updated map
-        await loadSession()
+        // New maps are not shared by default - show as unshared for DM
+        if (data.map && !data.map.shared) {
+          unsharedMap.value = data.map
+          currentMap.value = null // Players won't see it
+        } else {
+          currentMap.value = data.map
+          unsharedMap.value = null
+        }
+        
+        // Update session data without resetting map state
+        // We'll update session manually to avoid clearing the map we just uploaded
+        try {
+          const { data: sessionData } = await api.get(`/sessions/${sessionId}`)
+          if (sessionData && sessionData.session) {
+            session.value = sessionData.session
+            if (currentUserId.value) {
+              session.value.user_id = currentUserId.value
+            }
+            // Don't reset map state - we just set it above
+          }
+        } catch (err) {
+          console.error('Error reloading session after upload:', err)
+          // Continue anyway - map is already set
+        }
         
         // Reset file input
         if (fileInput.value) {
@@ -959,9 +1100,88 @@ export default {
       }
     }
 
+    const shareMap = async (mapId) => {
+      if (!mapId) {
+        console.error('No map ID provided to shareMap')
+        alert('Map ID is missing')
+        return
+      }
+      
+      sharingMap.value = true
+      try {
+        console.log('Sharing map with ID:', mapId)
+        const { data } = await api.put(`/maps/${mapId}/share`, { shared: true })
+        if (data.map) {
+          currentMap.value = data.map
+          unsharedMap.value = null
+          // Reload to sync with other users
+          await loadMap()
+        }
+      } catch (err) {
+        console.error('Error sharing map:', err)
+        console.error('Error details:', {
+          message: err.message,
+          response: err.response?.data,
+          status: err.response?.status
+        })
+        alert(err.response?.data?.error || 'Failed to share map')
+      } finally {
+        sharingMap.value = false
+      }
+    }
+
+    const unshareMap = async (mapId) => {
+      if (!mapId) {
+        console.error('No map ID provided to unshareMap')
+        alert('Map ID is missing')
+        return
+      }
+      
+      sharingMap.value = true
+      try {
+        console.log('Unsharing map with ID:', mapId)
+        const { data } = await api.put(`/maps/${mapId}/share`, { shared: false })
+        if (data.map) {
+          unsharedMap.value = data.map
+          currentMap.value = null
+        }
+      } catch (err) {
+        console.error('Error unsharing map:', err)
+        console.error('Error details:', {
+          message: err.message,
+          response: err.response?.data,
+          status: err.response?.status
+        })
+        alert(err.response?.data?.error || 'Failed to unshare map')
+      } finally {
+        sharingMap.value = false
+      }
+    }
+
     const getMapUrl = (filePath) => {
-      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000'
+      const apiUrl = getApiUrl()
       return `${apiUrl}${filePath}`
+    }
+
+    const getFogOfWar = (map) => {
+      if (!map || !map.fog_of_war) return []
+      try {
+        // Parse JSON string if it's a string, otherwise return as is
+        return typeof map.fog_of_war === 'string' ? JSON.parse(map.fog_of_war) : map.fog_of_war
+      } catch (err) {
+        console.error('Error parsing fog of war:', err)
+        return []
+      }
+    }
+
+    const handleFogOfWarUpdated = async (fogOfWar) => {
+      // Update local map state
+      const map = currentMap.value || unsharedMap.value
+      if (map) {
+        map.fog_of_war = JSON.stringify(fogOfWar)
+        // Reload map to sync with other users
+        await loadMap()
+      }
     }
 
     const handleImageError = () => {
@@ -970,6 +1190,80 @@ export default {
 
     const formatDate = (dateString) => {
       return new Date(dateString).toLocaleString()
+    }
+
+    const loadPawns = async () => {
+      try {
+        const { data } = await api.get(`/sessions/${sessionId}/pawns`)
+        allPawns.value = data.pawns || []
+      } catch (err) {
+        console.error('Error loading pawns:', err)
+        allPawns.value = []
+      }
+    }
+
+    const handlePawnClickForInitiative = (pawn) => {
+      if (showCreateInitiative.value) {
+        initiativeInputPawn.value = pawn
+        tempInitiativeValue.value = initiativeValues.value[pawn.id] || null
+      }
+    }
+
+    const openInitiativeInput = (pawn) => {
+      initiativeInputPawn.value = pawn
+      tempInitiativeValue.value = initiativeValues.value[pawn.id] || null
+    }
+
+    const closeInitiativeInput = () => {
+      initiativeInputPawn.value = null
+      tempInitiativeValue.value = null
+    }
+
+    const saveInitiativeValue = () => {
+      if (initiativeInputPawn.value && tempInitiativeValue.value !== null && tempInitiativeValue.value !== '') {
+        initiativeValues.value[initiativeInputPawn.value.id] = parseFloat(tempInitiativeValue.value) || 0
+      } else if (initiativeInputPawn.value) {
+        // Remove initiative if empty
+        delete initiativeValues.value[initiativeInputPawn.value.id]
+      }
+      closeInitiativeInput()
+    }
+
+    const getPawnInitial = (name) => {
+      if (!name) return '?'
+      return name.charAt(0).toUpperCase()
+    }
+
+    const rollD20 = () => {
+      const result = Math.floor(Math.random() * 20) + 1
+      diceResult.value = result
+      showDiceResult.value = true
+    }
+
+    const createInitiativeTable = () => {
+      creatingInitiative.value = true
+      
+      // Create initiative entries from pawns with initiative values
+      const entries = allPawns.value
+        .filter(pawn => initiativeValues.value[pawn.id] !== undefined && initiativeValues.value[pawn.id] !== null && initiativeValues.value[pawn.id] !== '')
+        .map(pawn => ({
+          pawnId: pawn.id,
+          pawnName: pawn.name,
+          initiative: parseFloat(initiativeValues.value[pawn.id]) || 0
+        }))
+        .sort((a, b) => b.initiative - a.initiative) // Sort from highest to lowest
+      
+      initiativeTable.value = entries
+      showCreateInitiative.value = false
+      creatingInitiative.value = false
+      
+      // Reset initiative values and current pawn
+      initiativeValues.value = {}
+      currentInitiativePawnId.value = null
+    }
+
+    const setCurrentInitiativePawn = (pawnId) => {
+      currentInitiativePawnId.value = pawnId
     }
 
     const loadQuotes = async () => {
@@ -1069,8 +1363,10 @@ export default {
 
       try {
         await api.post(`/sessions/${sessionId}/personal-notes`, {
+          title: newPersonalNoteTitle.value.trim() || null,
           note_text: newPersonalNote.value.trim()
         })
+        newPersonalNoteTitle.value = ''
         newPersonalNote.value = ''
         await loadPersonalNotes()
       } catch (err) {
@@ -1091,12 +1387,10 @@ export default {
       try {
         await api.post(`/sessions/${sessionId}/shared-notes`, {
           title: newSharedNoteTitle.value.trim() || null,
-          note_text: newSharedNote.value.trim(),
-          background_color: newSharedNoteColor.value
+          note_text: newSharedNote.value.trim()
         })
         newSharedNote.value = ''
         newSharedNoteTitle.value = ''
-        newSharedNoteColor.value = 'default'
         await loadSharedNotes()
       } catch (err) {
         console.error('Error adding shared note:', err)
@@ -1590,11 +1884,14 @@ export default {
 
     onMounted(async () => {
       await loadSession()
+      // Load map after session is loaded (with proper filtering)
+      await loadMap()
       startPolling()
-      await loadQuotes()
-      await loadEnemyStats()
-      await loadPersonalNotes()
-      await loadSharedNotes()
+        await loadQuotes()
+        await loadEnemyStats()
+        await loadPersonalNotes()
+        await loadSharedNotes()
+        await loadPawns()
       
       // Poll for new quotes every 3 seconds
       quotesPollInterval = setInterval(() => {
@@ -1637,6 +1934,7 @@ export default {
     return {
       session,
       currentMap,
+      unsharedMap,
       loading,
       error,
       uploading,
@@ -1647,6 +1945,11 @@ export default {
       transferDM,
       getMapUrl,
       formatDate,
+      shareMap,
+      unshareMap,
+      sharingMap,
+      getFogOfWar,
+      handleFogOfWarUpdated,
       inviteEmail,
       inviting,
       inviteError,
@@ -1655,6 +1958,24 @@ export default {
       showManageMembers,
       showManageQuotes,
       showManageEnemies,
+      showCreateInitiative,
+      allPawns,
+      initiativeValues,
+      initiativeTable,
+      createInitiativeTable,
+      creatingInitiative,
+      currentInitiativePawnId,
+      setCurrentInitiativePawn,
+      initiativeInputPawn,
+      tempInitiativeValue,
+      openInitiativeInput,
+      closeInitiativeInput,
+      saveInitiativeValue,
+      getPawnInitial,
+      handlePawnClickForInitiative,
+      rollD20,
+      diceResult,
+      showDiceResult,
       sessionId,
       quotes,
       enemies,
@@ -1673,14 +1994,8 @@ export default {
       sharedNotes,
       newPersonalNote,
       newPersonalNoteTitle,
-      newPersonalNoteColor,
       newSharedNote,
       newSharedNoteTitle,
-      newSharedNoteColor,
-      noteColors,
-      darkNoteColors,
-      isDarkTheme,
-      getNoteStyle,
       addingPersonalNote,
       addingSharedNote,
       deletingPersonalNoteId,
@@ -1797,6 +2112,133 @@ export default {
   gap: 8px;
 }
 
+.btn-dice {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border: none;
+  padding: 10px 16px;
+  border-radius: 8px;
+  font-size: 20px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+  min-width: 50px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.btn-dice:hover {
+  transform: scale(1.1) rotate(15deg);
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.5);
+}
+
+.btn-dice:active {
+  transform: scale(0.95) rotate(-15deg);
+}
+
+.dice-result-overlay {
+  z-index: 2000;
+}
+
+.dice-result-modal {
+  max-width: 300px;
+  text-align: center;
+}
+
+.dice-result-content {
+  padding: 20px;
+}
+
+.dice-icon {
+  font-size: 64px;
+  margin-bottom: 16px;
+  animation: dice-roll 0.5s ease-out;
+}
+
+.dice-result-value {
+  font-size: 72px;
+  font-weight: 700;
+  color: #667eea;
+  margin-bottom: 8px;
+  text-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+  animation: dice-pop 0.5s ease-out;
+}
+
+.dice-result-label {
+  font-size: 18px;
+  color: var(--text-secondary);
+  margin-bottom: 12px;
+  font-weight: 600;
+}
+
+.dice-result-crit {
+  font-size: 20px;
+  font-weight: 700;
+  color: #28a745;
+  margin-top: 12px;
+  animation: crit-pulse 1s ease-in-out infinite;
+}
+
+.dice-result-fail {
+  font-size: 20px;
+  font-weight: 700;
+  color: #dc3545;
+  margin-top: 12px;
+  animation: fail-pulse 1s ease-in-out infinite;
+}
+
+@keyframes dice-roll {
+  0% {
+    transform: rotate(0deg) scale(0.5);
+    opacity: 0;
+  }
+  50% {
+    transform: rotate(180deg) scale(1.2);
+  }
+  100% {
+    transform: rotate(360deg) scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes dice-pop {
+  0% {
+    transform: scale(0);
+    opacity: 0;
+  }
+  50% {
+    transform: scale(1.3);
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes crit-pulse {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.1);
+    opacity: 0.8;
+  }
+}
+
+@keyframes fail-pulse {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.1);
+    opacity: 0.8;
+  }
+}
+
 .session-content {
   margin-top: 0;
 }
@@ -1806,6 +2248,12 @@ export default {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 12px;
+}
+
+.map-section-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
 }
 
 .map-section-header h2 {
@@ -1834,13 +2282,52 @@ export default {
 
 .map-container {
   margin-top: 12px;
+  position: relative;
+}
+
+.map-info-container {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
 }
 
 .map-info {
-  margin-top: 8px;
   color: var(--text-secondary);
   font-size: 12px;
   text-align: center;
+  margin: 0;
+}
+
+.map-share-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.map-status-badge {
+  padding: 4px 12px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.map-status-draft {
+  background: #ffc107;
+  color: #333;
+}
+
+.map-status-shared {
+  background: #28a745;
+  color: white;
+}
+
+.share-map-btn {
+  padding: 6px 12px;
+  font-size: 12px;
 }
 
 .no-map {
@@ -1865,6 +2352,162 @@ export default {
 }
 
 /* Quotes Widget */
+.initiative-overlay {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 100;
+  pointer-events: none;
+}
+
+.initiative-widget-small {
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 8px;
+  width: max-content;
+  pointer-events: auto;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.initiative-widget-header-small {
+  margin-bottom: 6px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+.initiative-title-small {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.btn-tiny {
+  padding: 2px 6px;
+  font-size: 10px;
+  min-width: auto;
+  height: auto;
+  line-height: 1.2;
+}
+
+.initiative-list-small {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.initiative-item-small {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  background: var(--bg-secondary);
+  border-radius: 3px;
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.initiative-item-small:hover {
+  background: var(--hover-bg);
+}
+
+.initiative-item-small.active {
+  background: var(--primary-color);
+  color: white;
+  border: 2px solid var(--primary-color);
+}
+
+.initiative-item-small.active .initiative-rank-small,
+.initiative-item-small.active .initiative-name-small,
+.initiative-item-small.active .initiative-value-small {
+  color: white;
+}
+
+.initiative-rank-small {
+  font-weight: 600;
+  color: var(--text-secondary);
+  min-width: 16px;
+  font-size: 10px;
+}
+
+.initiative-name-small {
+  font-weight: 500;
+  font-size: 11px;
+  white-space: nowrap;
+  justify-self: start;
+}
+
+.initiative-value-small {
+  font-weight: 600;
+  color: var(--primary-color);
+  font-size: 11px;
+  text-align: right;
+  justify-self: end;
+}
+
+.initiative-creation-banner {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1000;
+  background: var(--card-bg);
+  border: 2px solid var(--primary-color);
+  border-radius: 8px;
+  padding: 12px 20px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+}
+
+.initiative-creation-content {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.initiative-creation-text {
+  font-weight: 600;
+  color: var(--text-primary);
+  font-size: 14px;
+}
+
+.initiative-creation-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.initiative-input-overlay {
+  z-index: 1000;
+}
+
+.initiative-input-modal {
+  max-width: 350px;
+}
+
+.initiative-input-field {
+  width: 100%;
+  padding: 12px;
+  border: 2px solid var(--border-color);
+  border-radius: 6px;
+  font-size: 16px;
+  background: var(--input-bg);
+  color: var(--text-primary);
+  text-align: center;
+  font-weight: 600;
+}
+
+.initiative-input-field:focus {
+  outline: none;
+  border-color: var(--primary-color);
+}
+
+.no-pawns {
+  text-align: center;
+  padding: 40px 20px;
+  color: var(--text-secondary);
+}
+
 .quotes-widget {
   margin-bottom: 16px;
 }

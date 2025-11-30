@@ -3,17 +3,17 @@ import { supabase } from './supabase'
 
 // Automatically detect API URL based on current hostname
 // This allows the app to work on localhost and on local network
-function getApiUrl() {
+export function getApiUrl() {
   // If explicitly set in env, use that
   if (import.meta.env.VITE_API_URL) {
     return import.meta.env.VITE_API_URL
   }
   
-  // Otherwise, use the current hostname with port 3000
-  // This works for both localhost and network IPs
-  const hostname = window.location.hostname
+  // Use the host machine IP (default to 192.168.1.111)
+  // This ensures all clients (local and remote) use the same backend server
+  const hostIP = import.meta.env.VITE_HOST_IP || '192.168.1.111'
   const protocol = window.location.protocol
-  const apiUrl = `${protocol}//${hostname}:3000`
+  const apiUrl = `${protocol}//${hostIP}:3000`
   
   // Log for debugging
   console.log('API URL detected:', apiUrl)
