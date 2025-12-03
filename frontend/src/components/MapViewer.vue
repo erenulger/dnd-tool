@@ -968,7 +968,7 @@ export default {
         position: 'absolute',
         left: `${screenX}px`,
         top: `${screenY}px`,
-        transform: 'translate(-50%, -50%)', // Center the pawn on its position
+        transform: 'translate(-50%, -18px)', // Center the pawn circle on its position (18px = half of 36px circle height)
         transformOrigin: 'center center'
       }
     }
