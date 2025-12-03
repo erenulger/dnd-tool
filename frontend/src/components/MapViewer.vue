@@ -1686,10 +1686,6 @@ export default {
 
 <style scoped>
 /* Pawn circle size - used for centering transform */
-:root {
-  --pawn-circle-size: 36px;
-}
-
 .map-viewer-container {
   --pawn-circle-size: 36px;
   position: relative;
@@ -2388,13 +2384,13 @@ export default {
     font-size: 18px;
   }
   
-  .pawn-circle {
-    width: var(--pawn-circle-size, 32px);
-    height: var(--pawn-circle-size, 32px);
-  }
-  
   .map-viewer-container {
     --pawn-circle-size: 32px;
+  }
+  
+  .pawn-circle {
+    width: var(--pawn-circle-size, 36px);
+    height: var(--pawn-circle-size, 36px);
   }
   
   .pawn-initial {
