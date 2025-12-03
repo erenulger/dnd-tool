@@ -149,7 +149,7 @@
             <div class="map-section-actions">
               <!-- Initiative Table Button -->
               <button 
-                v-if="session.is_dm" 
+                v-if="isDmOrDeveloper" 
                 @click="showCreateInitiative = true" 
                 class="btn btn-primary"
               >
@@ -157,7 +157,7 @@
               </button>
               <!-- DM Upload Button -->
               <button 
-                v-if="session.is_dm" 
+                v-if="isDmOrDeveloper" 
                 @click="triggerFileInput"
                 class="btn btn-primary upload-map-btn"
                 :disabled="uploading"
@@ -177,13 +177,13 @@
           />
 
           <!-- Map Display -->
-          <div v-if="currentMap || (session.is_dm && unsharedMap)" class="map-container">
+          <div v-if="currentMap || (isDmOrDeveloper && unsharedMap)" class="map-container">
             <MapViewer 
               v-if="session && (currentMap || unsharedMap)"
               :map-url="getMapUrl((currentMap || unsharedMap).file_path)"
               :map-name="(currentMap || unsharedMap).original_filename"
               :session-id="sessionId"
-              :is-dm="session.is_dm"
+              :is-dm="isDmOrDeveloper"
               :current-user-id="session.user_id || ''"
               :map-id="(currentMap || unsharedMap).id"
               :fog-of-war="getFogOfWar((currentMap || unsharedMap))"
@@ -218,9 +218,9 @@
             <div class="map-info-container">
               <p class="map-info">
                 {{ (currentMap || unsharedMap).original_filename }} 
-                <span v-if="session.is_dm">• Uploaded {{ formatDate((currentMap || unsharedMap).uploaded_at) }}</span>
+                <span v-if="isDmOrDeveloper">• Uploaded {{ formatDate((currentMap || unsharedMap).uploaded_at) }}</span>
               </p>
-              <div v-if="session.is_dm && (currentMap || unsharedMap)" class="map-share-controls">
+              <div v-if="isDmOrDeveloper && (currentMap || unsharedMap)" class="map-share-controls">
                 <span v-if="(currentMap || unsharedMap).shared === false" class="map-status-badge map-status-draft">
                   🔒 Draft (Not Shared)
                 </span>
@@ -248,7 +248,7 @@
           </div>
 
           <div v-else class="no-map">
-            <p v-if="session.is_dm">No map uploaded yet. Click "Upload Map" to add one.</p>
+            <p v-if="isDmOrDeveloper">No map uploaded yet. Click "Upload Map" to add one.</p>
             <p v-else>No map has been uploaded yet. The DM will upload a map soon!</p>
           </div>
         </div>
@@ -555,19 +555,74 @@
                     :key="quote.id"
                     class="quote-item"
                   >
-                    <div class="quote-content">
-                      <div class="quote-text">"{{ quote.quote_text }}"</div>
-                      <div class="quote-author">-<i>{{ quote.author_name }}</i></div>
+                    <!-- Edit Form -->
+                    <div v-if="editingQuoteId === quote.id" class="quote-edit-form">
+                      <div class="form-group">
+                        <label>Quote</label>
+                        <textarea 
+                          v-model="editQuote.text" 
+                          placeholder="Enter the memorable quote..."
+                          rows="3"
+                          required
+                          maxlength="500"
+                        ></textarea>
+                      </div>
+                      <div class="form-group">
+                        <label>Author Name</label>
+                        <input 
+                          type="text" 
+                          v-model="editQuote.author" 
+                          placeholder="Character or player name"
+                          required
+                          maxlength="100"
+                        />
+                      </div>
+                      <div class="form-actions">
+                        <button 
+                          type="button"
+                          @click="updateQuote(quote.id)" 
+                          class="btn btn-primary btn-small"
+                          :disabled="updatingQuote"
+                        >
+                          {{ updatingQuote ? 'Saving...' : 'Save' }}
+                        </button>
+                        <button 
+                          type="button"
+                          @click="cancelEditQuote" 
+                          class="btn btn-secondary btn-small"
+                          :disabled="updatingQuote"
+                        >
+                          Cancel
+                        </button>
+                      </div>
                     </div>
-                    <button 
-                      type="button"
-                      @click.stop="quoteToDelete = quote" 
-                      class="btn btn-danger btn-small quote-delete-btn"
-                      :disabled="deletingQuoteId === quote.id"
-                      title="Delete Quote"
-                    >
-                      ×
-                    </button>
+                    <!-- Display Quote -->
+                    <template v-else>
+                      <div class="quote-content">
+                        <div class="quote-text">"{{ quote.quote_text }}"</div>
+                        <div class="quote-author">-<i>{{ quote.author_name }}</i></div>
+                      </div>
+                      <div class="quote-actions">
+                        <button 
+                          type="button"
+                          @click.stop="startEditQuote(quote)" 
+                          class="btn btn-primary btn-small quote-edit-btn"
+                          :disabled="!canEditQuote(quote)"
+                          title="Edit Quote"
+                        >
+                          ✏️
+                        </button>
+                        <button 
+                          type="button"
+                          @click.stop="quoteToDelete = quote" 
+                          class="btn btn-danger btn-small quote-delete-btn"
+                          :disabled="deletingQuoteId === quote.id"
+                          title="Delete Quote"
+                        >
+                          ×
+                        </button>
+                      </div>
+                    </template>
                   </div>
                   
                   <div v-if="quotes.length === 0" class="no-quotes">
@@ -686,7 +741,7 @@
             
             <div class="modal-body">
               <!-- Invite Section (DM only) -->
-              <div v-if="session.is_dm" class="invite-section">
+              <div v-if="isDmOrDeveloper" class="invite-section">
                 <h3>Invite Players</h3>
                 <form @submit.prevent="sendInvitation" class="invite-form">
                   <div class="form-group">
@@ -727,18 +782,18 @@
                       <span 
                         v-else-if="member.character_class"
                         :class="['badge', 'badge-class', `badge-class-${getClassSlug(member.character_class)}`]"
-                        @click="session.is_dm && showClassModalForMember(member.user_id)"
-                        :style="session.is_dm ? 'cursor: pointer;' : ''"
-                        :title="session.is_dm ? 'Click to change class' : ''"
+                        @click="isDmOrDeveloper && showClassModalForMember(member.user_id)"
+                        :style="isDmOrDeveloper ? 'cursor: pointer;' : ''"
+                        :title="isDmOrDeveloper ? 'Click to change class' : ''"
                       >
                         {{ member.character_class }}
                       </span>
                       <span 
                         v-else
                         class="badge badge-class badge-class-none"
-                        @click="session.is_dm && showClassModalForMember(member.user_id)"
-                        :style="session.is_dm ? 'cursor: pointer;' : ''"
-                        :title="session.is_dm ? 'Click to set class' : ''"
+                        @click="isDmOrDeveloper && showClassModalForMember(member.user_id)"
+                        :style="isDmOrDeveloper ? 'cursor: pointer;' : ''"
+                        :title="isDmOrDeveloper ? 'Click to set class' : ''"
                       >
                         No Class
                       </span>
@@ -750,7 +805,7 @@
                       </span>
                     </div>
                     <button 
-                      v-if="session.is_dm && !member.is_dm"
+                      v-if="isDmOrDeveloper && !member.is_dm"
                       @click="transferDM(member.user_id)"
                       class="btn btn-primary"
                       style="padding: 6px 12px; font-size: 14px;"
@@ -762,7 +817,7 @@
               </div>
 
               <!-- Delete Session Section (DM only) -->
-              <div v-if="session.is_dm" class="delete-session-section">
+              <div v-if="isDmOrDeveloper" class="delete-session-section">
                 <h3>Danger Zone</h3>
                 <div class="delete-session-warning">
                   <p><strong>Warning:</strong> Deleting this session is permanent and cannot be undone.</p>
@@ -796,6 +851,7 @@ import { useRoute, useRouter } from 'vue-router'
 import api, { getApiUrl } from '../lib/api'
 import { supabase } from '../lib/supabase'
 import MapViewer from '../components/MapViewer.vue'
+import { characterClasses, getClassSlug as getClassSlugFromConfig, generateBadgeClassCSS, generateClassOptionCSS } from '../lib/classColorConfig'
 
 export default {
   name: 'SessionView',
@@ -835,6 +891,12 @@ export default {
     const quotes = ref([])
     const deletingQuoteId = ref(null)
     const quoteToDelete = ref(null)
+    const editingQuoteId = ref(null)
+    const editQuote = ref({
+      text: '',
+      author: ''
+    })
+    const updatingQuote = ref(false)
     const enemies = ref([])
     const personalNotes = ref([])
     const sharedNotes = ref([])
@@ -889,20 +951,8 @@ export default {
       { key: 'equipment', label: 'Equipment' },
       { key: 'features', label: 'Features' }
     ]
-    const dndClasses = [
-      { name: 'Barbarian', color: '#8B4513' },
-      { name: 'Bard', color: '#9370DB' },
-      { name: 'Cleric', color: '#FFD700' },
-      { name: 'Druid', color: '#228B22' },
-      { name: 'Fighter', color: '#C0C0C0' },
-      { name: 'Monk', color: '#FFA500' },
-      { name: 'Paladin', color: '#FFD700' },
-      { name: 'Ranger', color: '#228B22' },
-      { name: 'Rogue', color: '#2F2F2F' },
-      { name: 'Sorcerer', color: '#4B0082' },
-      { name: 'Warlock', color: '#8B008B' },
-      { name: 'Wizard', color: '#4169E1' }
-    ]
+    // Use centralized class config
+    const dndClasses = characterClasses
     let pollInterval = null
     let quotesPollInterval = null
     let enemyStatsPollInterval = null
@@ -960,7 +1010,7 @@ export default {
         const { data } = await api.get(`/sessions/${sessionId}/map`)
         
         // If DM, check if we have an unshared map that should be preserved
-        if (session.value?.is_dm && unsharedMap.value && !data.map) {
+        if (isDmOrDeveloper.value && unsharedMap.value && !data.map) {
           // Keep the unshared map if we have one and no shared map exists
           currentMap.value = null
           return
@@ -968,8 +1018,8 @@ export default {
         
         currentMap.value = data.map
         
-        // If DM and no shared map, try to load unshared map
-        if (session.value?.is_dm && !currentMap.value) {
+        // If DM/developer and no shared map, try to load unshared map
+        if (isDmOrDeveloper.value && !currentMap.value) {
           await loadUnsharedMap()
         } else {
           // Only clear unshared map if we have a shared map
@@ -1013,8 +1063,8 @@ export default {
     }
 
     const uploadMap = async (file) => {
-      if (!session.value?.is_dm) {
-        error.value = 'Only the DM can upload maps'
+      if (!isDmOrDeveloper.value) {
+        error.value = 'Only the DM or developer can upload maps'
         return
       }
 
@@ -1305,6 +1355,53 @@ export default {
       }
     }
 
+    const canEditQuote = (quote) => {
+      if (!currentUserId.value || !session.value) return false
+      // Creator can edit their own quotes
+      if (quote.created_by === currentUserId.value) return true
+      // DM or developer can edit any quote
+      if (session.value.is_dm || session.value.is_developer) return true
+      return false
+    }
+
+    const startEditQuote = (quote) => {
+      editingQuoteId.value = quote.id
+      editQuote.value = {
+        text: quote.quote_text,
+        author: quote.author_name
+      }
+    }
+
+    const cancelEditQuote = () => {
+      editingQuoteId.value = null
+      editQuote.value = { text: '', author: '' }
+    }
+
+    const updateQuote = async (quoteId) => {
+      if (!editQuote.value.text.trim() || !editQuote.value.author.trim()) {
+        alert('Both quote text and author name are required')
+        return
+      }
+
+      updatingQuote.value = true
+      error.value = ''
+
+      try {
+        await api.put(`/quotes/${quoteId}`, {
+          quote_text: editQuote.value.text,
+          author_name: editQuote.value.author
+        })
+        
+        await loadQuotes()
+        cancelEditQuote()
+      } catch (err) {
+        error.value = err.response?.data?.error || err.message || 'Failed to update quote'
+        alert(error.value)
+      } finally {
+        updatingQuote.value = false
+      }
+    }
+
     const confirmDeleteQuote = async () => {
       if (!quoteToDelete.value) {
         return
@@ -1471,10 +1568,8 @@ export default {
       }
     })
 
-    const getClassSlug = (className) => {
-      if (!className) return 'none'
-      return className.toLowerCase().replace(/\s+/g, '-')
-    }
+    // Use centralized getClassSlug function
+    const getClassSlug = getClassSlugFromConfig
 
     const showClassModalForMember = (userId) => {
       targetUserIdForClass.value = userId
@@ -1785,6 +1880,11 @@ export default {
       return session.value.members.find(member => member.user_id === currentUserId.value) || null
     })
 
+    // Computed property to check if user is DM or developer
+    const isDmOrDeveloper = computed(() => {
+      return session.value?.is_dm || session.value?.is_developer || false
+    })
+
     // Cycle through quotes automatically
     const startQuoteCycle = () => {
       if (quotes.value.length <= 1) return
@@ -1811,8 +1911,8 @@ export default {
     }, { immediate: true })
 
     const sendInvitation = async () => {
-      if (!session.value?.is_dm) {
-        inviteError.value = 'Only the DM can send invitations'
+      if (!isDmOrDeveloper.value) {
+        inviteError.value = 'Only the DM or developer can send invitations'
         return
       }
 
@@ -1840,8 +1940,8 @@ export default {
     }
 
     const deleteSession = async () => {
-      if (!session.value?.is_dm) {
-        error.value = 'Only the session owner can delete the session'
+      if (!isDmOrDeveloper.value) {
+        error.value = 'Only the session owner or developer can delete the session'
         return
       }
 
@@ -1866,9 +1966,9 @@ export default {
       }
     }
 
-    // Poll for map updates (for non-DM users)
+    // Poll for map updates (for non-DM/developer users)
     const startPolling = () => {
-      if (!session.value?.is_dm) {
+      if (!isDmOrDeveloper.value) {
         pollInterval = setInterval(() => {
           loadMap()
         }, 5000) // Poll every 5 seconds
@@ -1882,7 +1982,30 @@ export default {
       }
     }
 
+    // Inject dynamically generated class CSS (both badge and option styles)
+    const injectClassCSS = () => {
+      // Remove existing style tags if they exist
+      const existingBadgeStyle = document.getElementById('class-badge-styles')
+      const existingOptionStyle = document.getElementById('class-option-styles')
+      if (existingBadgeStyle) existingBadgeStyle.remove()
+      if (existingOptionStyle) existingOptionStyle.remove()
+      
+      // Create and inject badge styles
+      const badgeStyle = document.createElement('style')
+      badgeStyle.id = 'class-badge-styles'
+      badgeStyle.textContent = generateBadgeClassCSS()
+      document.head.appendChild(badgeStyle)
+      
+      // Create and inject option styles
+      const optionStyle = document.createElement('style')
+      optionStyle.id = 'class-option-styles'
+      optionStyle.textContent = generateClassOptionCSS()
+      document.head.appendChild(optionStyle)
+    }
+    
     onMounted(async () => {
+      // Inject all class CSS from config (badge and option styles)
+      injectClassCSS()
       await loadSession()
       // Load map after session is loaded (with proper filtering)
       await loadMap()
@@ -1989,6 +2112,13 @@ export default {
       quoteToDelete,
       confirmDeleteQuote,
       deletingQuoteId,
+      editingQuoteId,
+      editQuote,
+      updatingQuote,
+      canEditQuote,
+      startEditQuote,
+      cancelEditQuote,
+      updateQuote,
       scrollToMap,
       personalNotes,
       sharedNotes,
@@ -2010,6 +2140,7 @@ export default {
       deleting,
       deleteConfirmation,
       currentUserMember,
+      isDmOrDeveloper,
       showNicknameModal,
       newNickname,
       updateNickname,
@@ -2639,6 +2770,7 @@ export default {
 }
 
 .quotes-modal .quote-item {
+  position: relative;
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
@@ -2670,6 +2802,13 @@ export default {
   text-align: right;
 }
 
+.quotes-modal .quote-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.quotes-modal .quote-edit-btn,
 .quotes-modal .quote-delete-btn {
   flex-shrink: 0;
   width: 32px;
@@ -2678,10 +2817,56 @@ export default {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 20px;
+  font-size: 16px;
   line-height: 1;
   border-radius: 4px;
   min-width: 32px;
+}
+
+.quotes-modal .quote-edit-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.quotes-modal .quote-edit-form {
+  flex: 1;
+  width: 100%;
+}
+
+.quotes-modal .quote-edit-form .form-group {
+  margin-bottom: 12px;
+}
+
+.quotes-modal .quote-edit-form .form-group label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.quotes-modal .quote-edit-form .form-group textarea,
+.quotes-modal .quote-edit-form .form-group input {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  font-size: 14px;
+  background: var(--input-bg);
+  color: var(--text-primary);
+  font-family: inherit;
+}
+
+.quotes-modal .quote-edit-form .form-group textarea:focus,
+.quotes-modal .quote-edit-form .form-group input:focus {
+  outline: none;
+  border-color: #667eea;
+}
+
+.quotes-modal .quote-edit-form .form-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
 }
 
 .quote-preview {
@@ -3086,238 +3271,8 @@ export default {
   text-shadow: 0 1px 2px rgba(255, 255, 255, 0.8);
 }
 
-/* Class Colors - Background and Border */
-.class-barbarian { 
-  border-color: #8B4513; 
-  color: #8B4513; 
-  background: linear-gradient(135deg, #fff 0%, #f5e6d3 100%);
-}
-.class-barbarian::before { background: #8B4513; }
-.class-barbarian:hover:not(:disabled) { 
-  background: #8B4513; 
-  color: white; 
-  text-shadow: none;
-}
-.class-barbarian.selected { 
-  border-color: #8B4513; 
-  background: #8B4513; 
-  color: white;
-  text-shadow: none;
-}
-
-.class-bard { 
-  border-color: #9370DB; 
-  color: #9370DB; 
-  background: linear-gradient(135deg, #fff 0%, #e6d9f5 100%);
-}
-.class-bard::before { background: #9370DB; }
-.class-bard:hover:not(:disabled) { 
-  background: #9370DB; 
-  color: white; 
-  text-shadow: none;
-}
-.class-bard.selected { 
-  border-color: #9370DB; 
-  background: #9370DB; 
-  color: white;
-  text-shadow: none;
-}
-
-.class-cleric { 
-  border-color: #FFD700; 
-  color: #FFA500; 
-  background: linear-gradient(135deg, #fff 0%, #fff9e6 100%);
-}
-.class-cleric::before { background: #FFD700; }
-.class-cleric:hover:not(:disabled) { 
-  background: #FFD700; 
-  color: #333; 
-  text-shadow: none;
-}
-.class-cleric.selected { 
-  border-color: #FFD700; 
-  background: #FFD700; 
-  color: #333;
-  text-shadow: none;
-}
-
-.class-druid { 
-  border-color: #228B22; 
-  color: #228B22; 
-  background: linear-gradient(135deg, #fff 0%, #e6f5e6 100%);
-}
-.class-druid::before { background: #228B22; }
-.class-druid:hover:not(:disabled) { 
-  background: #228B22; 
-  color: white; 
-  text-shadow: none;
-}
-.class-druid.selected { 
-  border-color: #228B22; 
-  background: #228B22; 
-  color: white;
-  text-shadow: none;
-}
-
-.class-fighter { 
-  border-color: #C0C0C0; 
-  color: #666; 
-  background: linear-gradient(135deg, #fff 0%, #f5f5f5 100%);
-}
-.class-fighter::before { background: #C0C0C0; }
-.class-fighter:hover:not(:disabled) { 
-  background: #C0C0C0; 
-  color: #333; 
-  text-shadow: none;
-}
-.class-fighter.selected { 
-  border-color: #C0C0C0; 
-  background: #C0C0C0; 
-  color: #333;
-  text-shadow: none;
-}
-
-.class-monk { 
-  border-color: #FFA500; 
-  color: #FF8C00; 
-  background: linear-gradient(135deg, #fff 0%, #fff5e6 100%);
-}
-.class-monk::before { background: #FFA500; }
-.class-monk:hover:not(:disabled) { 
-  background: #FFA500; 
-  color: white; 
-  text-shadow: none;
-}
-.class-monk.selected { 
-  border-color: #FFA500; 
-  background: #FFA500; 
-  color: white;
-  text-shadow: none;
-}
-
-.class-paladin { 
-  border-color: #FFD700; 
-  color: #FFA500; 
-  background: linear-gradient(135deg, #fff 0%, #fff9e6 100%);
-}
-.class-paladin::before { background: #FFD700; }
-.class-paladin:hover:not(:disabled) { 
-  background: #FFD700; 
-  color: #333; 
-  text-shadow: none;
-}
-.class-paladin.selected { 
-  border-color: #FFD700; 
-  background: #FFD700; 
-  color: #333;
-  text-shadow: none;
-}
-
-.class-ranger { 
-  border-color: #228B22; 
-  color: #228B22; 
-  background: linear-gradient(135deg, #fff 0%, #e6f5e6 100%);
-}
-.class-ranger::before { background: #228B22; }
-.class-ranger:hover:not(:disabled) { 
-  background: #228B22; 
-  color: white; 
-  text-shadow: none;
-}
-.class-ranger.selected { 
-  border-color: #228B22; 
-  background: #228B22; 
-  color: white;
-  text-shadow: none;
-}
-
-.class-rogue { 
-  border-color: #2F2F2F; 
-  color: #2F2F2F; 
-  background: linear-gradient(135deg, #fff 0%, #e8e8e8 100%);
-}
-.class-rogue::before { background: #2F2F2F; }
-.class-rogue:hover:not(:disabled) { 
-  background: #2F2F2F; 
-  color: white; 
-  text-shadow: none;
-}
-.class-rogue.selected { 
-  border-color: #2F2F2F; 
-  background: #2F2F2F; 
-  color: white;
-  text-shadow: none;
-}
-
-.class-sorcerer { 
-  border-color: #4B0082; 
-  color: #4B0082; 
-  background: linear-gradient(135deg, #fff 0%, #e6d9f0 100%);
-}
-.class-sorcerer::before { background: #4B0082; }
-.class-sorcerer:hover:not(:disabled) { 
-  background: #4B0082; 
-  color: white; 
-  text-shadow: none;
-}
-.class-sorcerer.selected { 
-  border-color: #4B0082; 
-  background: #4B0082; 
-  color: white;
-  text-shadow: none;
-}
-
-.class-warlock { 
-  border-color: #8B008B; 
-  color: #8B008B; 
-  background: linear-gradient(135deg, #fff 0%, #f0d9f0 100%);
-}
-.class-warlock::before { background: #8B008B; }
-.class-warlock:hover:not(:disabled) { 
-  background: #8B008B; 
-  color: white; 
-  text-shadow: none;
-}
-.class-warlock.selected { 
-  border-color: #8B008B; 
-  background: #8B008B; 
-  color: white;
-  text-shadow: none;
-}
-
-.class-wizard { 
-  border-color: #4169E1; 
-  color: #4169E1; 
-  background: linear-gradient(135deg, #fff 0%, #e6e9f5 100%);
-}
-.class-wizard::before { background: #4169E1; }
-.class-wizard:hover:not(:disabled) { 
-  background: #4169E1; 
-  color: white; 
-  text-shadow: none;
-}
-.class-wizard.selected { 
-  border-color: #4169E1; 
-  background: #4169E1; 
-  color: white;
-  text-shadow: none;
-}
-
-.class-none { 
-  border-color: #999; 
-  color: #999; 
-  background: linear-gradient(135deg, #fff 0%, #f5f5f5 100%);
-}
-.class-none::before { background: #999; }
-.class-none:hover:not(:disabled) { 
-  background: #f5f5f5; 
-  color: #666;
-}
-.class-none.selected { 
-  border-color: #999; 
-  background: #f5f5f5; 
-  color: #666;
-}
+/* Class Colors - Dynamically generated from classColorConfig.js */
+/* Styles are injected via JavaScript in onMounted hook */
 
 /* D&D Search Modal Styles */
 .dnd-search-modal {
@@ -3676,6 +3631,8 @@ export default {
   background: #17a2b8;
   color: white;
 }
+
+/* Class Badge Styles - Imported from shared config in script section */
 
 .enemy-date {
   font-size: 11px;

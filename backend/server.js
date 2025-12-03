@@ -93,11 +93,88 @@ const verifyAuth = async (req, res, next) => {
   }
 };
 
+// Helper function to check if user is a developer
+// Developers are defined in DEVELOPER_USER_IDS or DEVELOPER_USER_EMAILS environment variables
+// Format: comma-separated list of user IDs or emails
+const isDeveloper = (userId, userEmail) => {
+  const developerIds = process.env.DEVELOPER_USER_IDS?.split(',').map(id => id.trim()).filter(Boolean) || [];
+  const developerEmails = process.env.DEVELOPER_USER_EMAILS?.split(',').map(email => email.trim().toLowerCase()).filter(Boolean) || [];
+  
+  const userEmailLower = userEmail?.toLowerCase();
+  return developerIds.includes(userId) || developerEmails.includes(userEmailLower);
+};
+
+// Helper function to check if user has DM or developer permissions
+// This function checks both session-level DM status and global developer role
+const hasDmOrDeveloperPermissions = async (userId, userEmail, sessionId) => {
+  // First check if user is a developer (global permission)
+  if (isDeveloper(userId, userEmail)) {
+    return true;
+  }
+  
+  // Then check if user is DM in this session
+  if (sessionId) {
+    const { data: membership, error } = await supabase
+      .from('session_members')
+      .select('is_dm')
+      .eq('session_id', sessionId)
+      .eq('user_id', userId)
+      .single();
+    
+    if (!error && membership && membership.is_dm) {
+      return true;
+    }
+  }
+  
+  return false;
+};
+
 // Routes
 
 // Health check
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+// Debug endpoint to check developer status
+app.get('/api/debug/developer-status', verifyAuth, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const userEmail = req.user.email;
+    const userEmailLower = userEmail?.toLowerCase();
+    
+    const developerIds = process.env.DEVELOPER_USER_IDS?.split(',').map(id => id.trim()).filter(Boolean) || [];
+    const developerEmails = process.env.DEVELOPER_USER_EMAILS?.split(',').map(email => email.trim().toLowerCase()).filter(Boolean) || [];
+    
+    const isDev = isDeveloper(userId, userEmail);
+    
+    // Check if email matches
+    const emailMatches = developerEmails.includes(userEmailLower);
+    const idMatches = developerIds.includes(userId);
+    
+    res.json({
+      userId,
+      userEmail,
+      userEmailLower,
+      developerIds,
+      developerEmails,
+      isDeveloper: isDev,
+      emailMatches,
+      idMatches,
+      envVarsSet: {
+        DEVELOPER_USER_IDS: !!process.env.DEVELOPER_USER_IDS,
+        DEVELOPER_USER_EMAILS: !!process.env.DEVELOPER_USER_EMAILS,
+        DEVELOPER_USER_EMAILS_RAW: process.env.DEVELOPER_USER_EMAILS || 'NOT SET'
+      },
+      rawUserObject: {
+        id: req.user.id,
+        email: req.user.email,
+        // Include other user properties for debugging
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 });
 
 // Get current user
@@ -250,12 +327,17 @@ app.get('/api/sessions', verifyAuth, async (req, res) => {
       });
     });
 
+    // Check if user is developer
+    const userEmail = req.user.email;
+    const isDev = isDeveloper(userId, userEmail);
+    
     // Combine session data with membership info and members list
     const formattedSessions = (sessions || []).map(session => {
       const membership = sessionMembers.find(sm => sm.session_id === session.id);
       return {
         ...session,
         is_dm: membership?.is_dm || false,
+        is_developer: isDev,
         members: membersBySession[session.id] || []
       };
     });
@@ -336,8 +418,10 @@ app.get('/api/sessions/:sessionId', verifyAuth, async (req, res) => {
             .select('*')
             .eq('id', session.current_map_id);
 
-          // If user is not DM, only return shared maps
-          if (!membership.is_dm) {
+          // If user is not DM or developer, only return shared maps
+          const userEmail = req.user.email;
+          const isDev = isDeveloper(req.user.id, userEmail);
+          if (!membership.is_dm && !isDev) {
             mapQuery = mapQuery.eq('shared', true);
           }
 
@@ -349,10 +433,15 @@ app.get('/api/sessions/:sessionId', verifyAuth, async (req, res) => {
           }
         }
         
+        // Check if user is developer
+        const userEmail = req.user.email;
+        const isDev = isDeveloper(req.user.id, userEmail);
+        
         res.json({
           session: {
             ...session,
             is_dm: membership.is_dm,
+            is_developer: isDev,
             members: membersWithUsers || [],
             current_map: currentMap
           }
@@ -386,8 +475,10 @@ app.get('/api/sessions/:sessionId', verifyAuth, async (req, res) => {
         .select('*')
         .eq('id', session.current_map_id);
 
-      // If user is not DM, only return shared maps
-      if (!membership.is_dm) {
+      // If user is not DM or developer, only return shared maps
+      const userEmail = req.user.email;
+      const isDev = isDeveloper(userId, userEmail);
+      if (!membership.is_dm && !isDev) {
         mapQuery = mapQuery.eq('shared', true);
       }
 
@@ -399,10 +490,15 @@ app.get('/api/sessions/:sessionId', verifyAuth, async (req, res) => {
       }
     }
 
+    // Check if user is developer
+    const userEmail = req.user.email;
+    const isDev = isDeveloper(userId, userEmail);
+    
     res.json({
       session: {
         ...session,
         is_dm: membership.is_dm,
+        is_developer: isDev,
         members: membersWithUsers || [],
         current_map: currentMap
       }
@@ -478,9 +574,11 @@ app.delete('/api/sessions/:sessionId', verifyAuth, async (req, res) => {
       return res.status(404).json({ error: 'Session not found' });
     }
 
-    // Verify user is the DM
-    if (session.dm_user_id !== userId) {
-      return res.status(403).json({ error: 'Only the session owner can delete the session' });
+    // Verify user is the DM or a developer
+    const userEmail = req.user.email;
+    const isDev = isDeveloper(userId, userEmail);
+    if (session.dm_user_id !== userId && !isDev) {
+      return res.status(403).json({ error: 'Only the session owner or a developer can delete the session' });
     }
 
     // Get all maps for this session to delete files
@@ -546,7 +644,9 @@ app.post('/api/sessions/:sessionId/transfer-dm', verifyAuth, async (req, res) =>
       return res.status(400).json({ error: 'newDmUserId is required' });
     }
 
-    // Verify current user is DM
+    // Verify current user is DM or developer
+    const userEmail = req.user.email;
+    const isDev = isDeveloper(userId, userEmail);
     const { data: currentMembership, error: currentError } = await supabase
       .from('session_members')
       .select('is_dm')
@@ -554,8 +654,8 @@ app.post('/api/sessions/:sessionId/transfer-dm', verifyAuth, async (req, res) =>
       .eq('user_id', userId)
       .single();
 
-    if (currentError || !currentMembership || !currentMembership.is_dm) {
-      return res.status(403).json({ error: 'Only the current DM can transfer the role' });
+    if ((currentError || !currentMembership || !currentMembership.is_dm) && !isDev) {
+      return res.status(403).json({ error: 'Only the current DM or a developer can transfer the role' });
     }
 
     // Verify new DM is a member
@@ -665,9 +765,11 @@ app.put('/api/sessions/:sessionId/class', verifyAuth, async (req, res) => {
       return res.status(403).json({ error: 'You are not a member of this session' });
     }
 
-    // If updating someone else's class, verify user is DM
-    if (updateUserId !== userId && !membership.is_dm) {
-      return res.status(403).json({ error: 'Only the DM can update other players\' classes' });
+    // If updating someone else's class, verify user is DM or developer
+    const userEmail = req.user.email;
+    const isDev = isDeveloper(userId, userEmail);
+    if (updateUserId !== userId && !membership.is_dm && !isDev) {
+      return res.status(403).json({ error: 'Only the DM or a developer can update other players\' classes' });
     }
 
     // Verify target user is a member
@@ -733,7 +835,9 @@ app.post('/api/sessions/:sessionId/invite', verifyAuth, async (req, res) => {
       return res.status(400).json({ error: 'Valid email address is required' });
     }
 
-    // Verify user is DM
+    // Verify user is DM or developer
+    const userEmail = req.user.email;
+    const isDev = isDeveloper(userId, userEmail);
     const { data: membership, error: memberError } = await supabase
       .from('session_members')
       .select('is_dm')
@@ -741,8 +845,8 @@ app.post('/api/sessions/:sessionId/invite', verifyAuth, async (req, res) => {
       .eq('user_id', userId)
       .single();
 
-    if (memberError || !membership || !membership.is_dm) {
-      return res.status(403).json({ error: 'Only the DM can invite users' });
+    if ((memberError || !membership || !membership.is_dm) && !isDev) {
+      return res.status(403).json({ error: 'Only the DM or a developer can invite users' });
     }
 
     // Check if session exists
@@ -1076,7 +1180,9 @@ app.post('/api/sessions/:sessionId/maps', verifyAuth, upload.single('map'), asyn
       return res.status(400).json({ error: 'No file uploaded' });
     }
 
-    // Verify user is DM
+    // Verify user is DM or developer
+    const userEmail = req.user.email;
+    const isDev = isDeveloper(userId, userEmail);
     const { data: membership, error: memberError } = await supabase
       .from('session_members')
       .select('is_dm')
@@ -1084,10 +1190,10 @@ app.post('/api/sessions/:sessionId/maps', verifyAuth, upload.single('map'), asyn
       .eq('user_id', userId)
       .single();
 
-    if (memberError || !membership || !membership.is_dm) {
+    if ((memberError || !membership || !membership.is_dm) && !isDev) {
       // Delete uploaded file if not authorized
       fs.unlinkSync(req.file.path);
-      return res.status(403).json({ error: 'Only the DM can upload maps' });
+      return res.status(403).json({ error: 'Only the DM or a developer can upload maps' });
     }
 
     // Create map record (default to not shared - DM can share later)
@@ -1151,7 +1257,9 @@ app.put('/api/maps/:mapId/share', verifyAuth, async (req, res) => {
       return res.status(404).json({ error: 'Map not found' });
     }
 
-    // Verify user is DM
+    // Verify user is DM or developer
+    const userEmail = req.user.email;
+    const isDev = isDeveloper(userId, userEmail);
     const { data: membership, error: memberError } = await supabase
       .from('session_members')
       .select('is_dm')
@@ -1159,8 +1267,8 @@ app.put('/api/maps/:mapId/share', verifyAuth, async (req, res) => {
       .eq('user_id', userId)
       .single();
 
-    if (memberError || !membership || !membership.is_dm) {
-      return res.status(403).json({ error: 'Only the DM can share/unshare maps' });
+    if ((memberError || !membership || !membership.is_dm) && !isDev) {
+      return res.status(403).json({ error: 'Only the DM or a developer can share/unshare maps' });
     }
 
     // Update map shared status
@@ -1199,7 +1307,9 @@ app.put('/api/maps/:mapId/fog-of-war', verifyAuth, async (req, res) => {
       return res.status(404).json({ error: 'Map not found' });
     }
 
-    // Verify user is DM
+    // Verify user is DM or developer
+    const userEmail = req.user.email;
+    const isDev = isDeveloper(userId, userEmail);
     const { data: membership, error: memberError } = await supabase
       .from('session_members')
       .select('is_dm')
@@ -1207,8 +1317,8 @@ app.put('/api/maps/:mapId/fog-of-war', verifyAuth, async (req, res) => {
       .eq('user_id', userId)
       .single();
 
-    if (memberError || !membership || !membership.is_dm) {
-      return res.status(403).json({ error: 'Only the DM can update fog of war' });
+    if ((memberError || !membership || !membership.is_dm) && !isDev) {
+      return res.status(403).json({ error: 'Only the DM or a developer can update fog of war' });
     }
 
     // Update fog of war (store as JSON string)
@@ -1236,7 +1346,9 @@ app.get('/api/sessions/:sessionId/map', verifyAuth, async (req, res) => {
     const { sessionId } = req.params;
     const userId = req.user.id;
 
-    // Verify user is a member and check if DM
+    // Verify user is a member and check if DM or developer
+    const userEmail = req.user.email;
+    const isDev = isDeveloper(userId, userEmail);
     const { data: membership, error: memberError } = await supabase
       .from('session_members')
       .select('id, is_dm')
@@ -1249,6 +1361,7 @@ app.get('/api/sessions/:sessionId/map', verifyAuth, async (req, res) => {
     }
 
     const isDm = membership.is_dm;
+    const hasFullAccess = isDm || isDev;
 
     // Get session to find current map
     const { data: session, error: sessionError } = await supabase
@@ -1269,16 +1382,16 @@ app.get('/api/sessions/:sessionId/map', verifyAuth, async (req, res) => {
       .select('*')
       .eq('id', session.current_map_id);
 
-    // If user is not DM, only show shared maps
-    if (!isDm) {
+    // If user is not DM or developer, only show shared maps
+    if (!hasFullAccess) {
       mapQuery = mapQuery.eq('shared', true);
     }
 
     const { data: map, error: mapError } = await mapQuery.single();
 
     if (mapError) {
-      // If map not found and user is not DM, it might be because map is not shared
-      if (!isDm) {
+      // If map not found and user is not DM or developer, it might be because map is not shared
+      if (!hasFullAccess) {
         return res.json({ map: null });
       }
       throw mapError;
@@ -1308,7 +1421,9 @@ app.get('/api/sessions/:sessionId/pawns', verifyAuth, async (req, res) => {
       return res.status(403).json({ error: 'You are not a member of this session' });
     }
 
-    // Check if user is DM
+    // Check if user is DM or developer
+    const userEmail = req.user.email;
+    const isDev = isDeveloper(userId, userEmail);
     const { data: dmCheck, error: dmCheckError } = await supabase
       .from('session_members')
       .select('is_dm')
@@ -1317,9 +1432,10 @@ app.get('/api/sessions/:sessionId/pawns', verifyAuth, async (req, res) => {
       .single();
 
     const isDm = dmCheck?.is_dm || false;
+    const hasFullAccess = isDm || isDev;
 
     // Get all active pawns for this session (status is null)
-    // If user is not DM, filter out invisible pawns
+    // If user is not DM or developer, filter out invisible pawns
     let pawnsQuery = supabase
       .from('pawns')
       .select('*')
@@ -1327,8 +1443,8 @@ app.get('/api/sessions/:sessionId/pawns', verifyAuth, async (req, res) => {
       .is('status', null)
       .order('created_at', { ascending: true });
 
-    // Filter invisible pawns for non-DM users
-    if (!isDm) {
+    // Filter invisible pawns for non-DM/developer users
+    if (!hasFullAccess) {
       pawnsQuery = pawnsQuery.eq('visible', true);
     }
 
@@ -1350,7 +1466,9 @@ app.post('/api/sessions/:sessionId/pawns', verifyAuth, async (req, res) => {
     const { name, color, status_color, x_position, y_position, owned_by, hp, max_hp, visible } = req.body;
     const userId = req.user.id;
 
-    // Verify user is DM
+    // Verify user is DM or developer
+    const userEmail = req.user.email;
+    const isDev = isDeveloper(userId, userEmail);
     const { data: membership, error: memberError } = await supabase
       .from('session_members')
       .select('is_dm')
@@ -1358,8 +1476,8 @@ app.post('/api/sessions/:sessionId/pawns', verifyAuth, async (req, res) => {
       .eq('user_id', userId)
       .single();
 
-    if (memberError || !membership || !membership.is_dm) {
-      return res.status(403).json({ error: 'Only the DM can create pawns' });
+    if ((memberError || !membership || !membership.is_dm) && !isDev) {
+      return res.status(403).json({ error: 'Only the DM or a developer can create pawns' });
     }
 
     // Create pawn
@@ -1422,7 +1540,9 @@ app.put('/api/pawns/:pawnId', verifyAuth, async (req, res) => {
       return res.status(403).json({ error: 'You are not a member of this session' });
     }
 
-    const canMove = membership.is_dm || pawn.owned_by === userId;
+    const userEmail = req.user.email;
+    const isDev = isDeveloper(userId, userEmail);
+    const canMove = membership.is_dm || isDev || pawn.owned_by === userId;
 
     if (!canMove) {
       return res.status(403).json({ error: 'You can only move your own pawns' });
@@ -1443,13 +1563,13 @@ app.put('/api/pawns/:pawnId', verifyAuth, async (req, res) => {
     if (status_color !== undefined) updateData.status_color = status_color || null;
     if (owned_by !== undefined) updateData.owned_by = owned_by || null;
     
-    // If updating HP, visibility, name, color, or owned_by, verify user is DM
-    if ((hp !== undefined || max_hp !== undefined || visible !== undefined || name !== undefined || color !== undefined || owned_by !== undefined) && !membership.is_dm) {
-      return res.status(403).json({ error: 'Only the DM can update pawn properties' });
+    // If updating HP, visibility, name, color, or owned_by, verify user is DM or developer
+    if ((hp !== undefined || max_hp !== undefined || visible !== undefined || name !== undefined || color !== undefined || owned_by !== undefined) && !membership.is_dm && !isDev) {
+      return res.status(403).json({ error: 'Only the DM or a developer can update pawn properties' });
     }
     
     // Players can update their own pawn's status_color
-    if (status_color !== undefined && !membership.is_dm) {
+    if (status_color !== undefined && !membership.is_dm && !isDev) {
       if (pawn.owned_by !== userId) {
         return res.status(403).json({ error: 'You can only update your own pawn\'s status color' });
       }
@@ -1494,7 +1614,9 @@ app.put('/api/pawns/:pawnId/status', verifyAuth, async (req, res) => {
       return res.status(404).json({ error: 'Pawn not found' });
     }
 
-    // Verify user is DM
+    // Verify user is DM or developer
+    const userEmail = req.user.email;
+    const isDev = isDeveloper(userId, userEmail);
     const { data: membership, error: memberError } = await supabase
       .from('session_members')
       .select('is_dm')
@@ -1502,8 +1624,8 @@ app.put('/api/pawns/:pawnId/status', verifyAuth, async (req, res) => {
       .eq('user_id', userId)
       .single();
 
-    if (memberError || !membership || !membership.is_dm) {
-      return res.status(403).json({ error: 'Only the DM can set enemy status' });
+    if ((memberError || !membership || !membership.is_dm) && !isDev) {
+      return res.status(403).json({ error: 'Only the DM or a developer can set enemy status' });
     }
 
     // Update pawn status
@@ -1547,7 +1669,9 @@ app.delete('/api/pawns/:pawnId', verifyAuth, async (req, res) => {
       return res.status(404).json({ error: 'Pawn not found' });
     }
 
-    // Verify user is DM
+    // Verify user is DM or developer
+    const userEmail = req.user.email;
+    const isDev = isDeveloper(userId, userEmail);
     const { data: membership, error: memberError } = await supabase
       .from('session_members')
       .select('is_dm')
@@ -1555,8 +1679,8 @@ app.delete('/api/pawns/:pawnId', verifyAuth, async (req, res) => {
       .eq('user_id', userId)
       .single();
 
-    if (memberError || !membership || !membership.is_dm) {
-      return res.status(403).json({ error: 'Only the DM can delete pawns' });
+    if ((memberError || !membership || !membership.is_dm) && !isDev) {
+      return res.status(403).json({ error: 'Only the DM or a developer can delete pawns' });
     }
 
     // Delete pawn
@@ -1697,6 +1821,74 @@ app.post('/api/sessions/:sessionId/quotes', verifyAuth, async (req, res) => {
   } catch (error) {
     console.error('Create quote error:', error);
     res.status(500).json({ error: error.message || 'Failed to create quote' });
+  }
+});
+
+// Update a quote (creator can edit their own, DM/developer can edit any)
+app.put('/api/quotes/:quoteId', verifyAuth, async (req, res) => {
+  try {
+    const { quoteId } = req.params;
+    const { quote_text, author_name } = req.body;
+    const userId = req.user.id;
+
+    if (!quote_text || !quote_text.trim()) {
+      return res.status(400).json({ error: 'Quote text is required' });
+    }
+
+    if (!author_name || !author_name.trim()) {
+      return res.status(400).json({ error: 'Author name is required' });
+    }
+
+    // Get quote
+    const { data: quote, error: quoteError } = await supabase
+      .from('quotes')
+      .select('session_id, created_by')
+      .eq('id', quoteId)
+      .single();
+
+    if (quoteError || !quote) {
+      return res.status(404).json({ error: 'Quote not found' });
+    }
+
+    // Verify user is a member of the session
+    const { data: membership, error: memberError } = await supabase
+      .from('session_members')
+      .select('is_dm')
+      .eq('session_id', quote.session_id)
+      .eq('user_id', userId)
+      .single();
+
+    if (memberError || !membership) {
+      return res.status(403).json({ error: 'You are not a member of this session' });
+    }
+
+    // Check if user can edit: creator can edit their own, DM/developer can edit any
+    const userEmail = req.user.email;
+    const isDev = isDeveloper(userId, userEmail);
+    const isCreator = quote.created_by === userId;
+    const isDm = membership.is_dm;
+
+    if (!isCreator && !isDm && !isDev) {
+      return res.status(403).json({ error: 'You can only edit quotes you created, or you must be a DM or developer' });
+    }
+
+    // Update quote
+    const { data: updatedQuote, error: updateError } = await supabase
+      .from('quotes')
+      .update({
+        quote_text: quote_text.trim(),
+        author_name: author_name.trim()
+      })
+      .eq('id', quoteId)
+      .select()
+      .single();
+
+    if (updateError) throw updateError;
+
+    res.json({ quote: updatedQuote, message: 'Quote updated successfully' });
+  } catch (error) {
+    console.error('Update quote error:', error);
+    res.status(500).json({ error: error.message || 'Failed to update quote' });
   }
 });
 

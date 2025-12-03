@@ -1,0 +1,11 @@
+/**
+ * Shared CSS styles for character class badges
+ * 
+ * NOTE: This file is now DEPRECATED. Styles are generated dynamically from classColorConfig.js
+ * 
+ * The CSS is now injected via JavaScript in components that use it.
+ * This file is kept for reference but should not be manually edited.
+ * 
+ * To change colors, edit frontend/src/lib/classColorConfig.js
+ */
+

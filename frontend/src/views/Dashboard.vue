@@ -160,6 +160,7 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import api from '../lib/api'
+import { generateBadgeClassCSS } from '../lib/classColorConfig'
 
 export default {
   name: 'Dashboard',
@@ -322,7 +323,24 @@ export default {
       }
     }
 
+    // Inject dynamically generated badge CSS
+    const injectBadgeCSS = () => {
+      // Remove existing style tag if it exists
+      const existingStyle = document.getElementById('class-badge-styles')
+      if (existingStyle) {
+        existingStyle.remove()
+      }
+      
+      // Create and inject new style tag
+      const style = document.createElement('style')
+      style.id = 'class-badge-styles'
+      style.textContent = generateBadgeClassCSS()
+      document.head.appendChild(style)
+    }
+    
     onMounted(async () => {
+      // Inject badge CSS from config
+      injectBadgeCSS()
       // Test connection first
       const connected = await testConnection()
       if (connected) {
@@ -518,26 +536,7 @@ export default {
   gap: 8px;
 }
 
-/* Class Badge Styles */
-.badge-class {
-  font-weight: 600;
-  padding: 4px 10px;
-  border-radius: 12px;
-  font-size: 12px;
-}
-
-.badge-class-barbarian { background: #8B4513; color: white; }
-.badge-class-bard { background: #9370DB; color: white; }
-.badge-class-cleric { background: #FFD700; color: #333; }
-.badge-class-druid { background: #228B22; color: white; }
-.badge-class-fighter { background: #C0C0C0; color: #333; }
-.badge-class-monk { background: #FFA500; color: white; }
-.badge-class-paladin { background: #FFD700; color: #333; }
-.badge-class-ranger { background: #228B22; color: white; }
-.badge-class-rogue { background: #2F2F2F; color: white; }
-.badge-class-sorcerer { background: #4B0082; color: white; }
-.badge-class-warlock { background: #8B008B; color: white; }
-.badge-class-wizard { background: #4169E1; color: white; }
-.badge-class-none { background: #e0e0e0; color: #666; }
+/* Class Badge Styles - Dynamically generated from classColorConfig.js */
+/* Styles are injected via JavaScript in onMounted hook */
 </style>
 

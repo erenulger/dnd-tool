@@ -64,7 +64,7 @@
         class="fog-of-war-overlay"
         :style="fogOverlayStyle"
       >
-        <g :transform="`translate(${translateX}, ${translateY}) scale(${scale})`">
+        <g :transform="`translate3d(${translateX}px, ${translateY}px, 0) scale(${scale})`">
           <polygon
             v-for="(fog, index) in fogOfWar"
             :key="index"
@@ -442,6 +442,7 @@ export default {
     const isDragging = ref(false)
     const dragStart = ref({ x: 0, y: 0 })
     const lastTranslate = ref({ x: 0, y: 0 })
+    let animationFrameId = null
     
     // Touch state
     const touchStartDistance = ref(0)
@@ -561,17 +562,22 @@ export default {
     })
 
     const imageStyle = computed(() => {
+      // Use transform3d for hardware acceleration
+      const transform = `translate3d(${translateX.value}px, ${translateY.value}px, 0) scale(${scale.value})`
+      
       if (imageWidth.value === 0 || imageHeight.value === 0) {
         return {
-          transform: `translate(${translateX.value}px, ${translateY.value}px) scale(${scale.value})`,
-          transformOrigin: '0 0'
+          transform,
+          transformOrigin: '0 0',
+          willChange: isDragging.value ? 'transform' : 'auto'
         }
       }
       return {
-        transform: `translate(${translateX.value}px, ${translateY.value}px) scale(${scale.value})`,
+        transform,
         transformOrigin: '0 0',
         width: `${imageWidth.value}px`,
-        height: `${imageHeight.value}px`
+        height: `${imageHeight.value}px`,
+        willChange: isDragging.value ? 'transform' : 'auto'
       }
     })
     
@@ -707,28 +713,50 @@ export default {
       dragStart.value = { x: e.clientX, y: e.clientY }
       e.preventDefault()
       
-      document.addEventListener('mousemove', handleMouseMove)
+      // Cancel any pending animation frame
+      if (animationFrameId) {
+        cancelAnimationFrame(animationFrameId)
+        animationFrameId = null
+      }
+      
+      document.addEventListener('mousemove', handleMouseMove, { passive: false })
       document.addEventListener('mouseup', handleMouseUp)
     }
     
     const handleMouseMove = (e) => {
       if (!isDragging.value) return
       
-      const deltaX = e.clientX - dragStart.value.x
-      const deltaY = e.clientY - dragStart.value.y
+      e.preventDefault()
       
-      // Apply damping factor to reduce acceleration (0.8 = 80% of movement)
-      const dragSensitivity = 0.8
+      // Cancel any pending animation frame
+      if (animationFrameId) {
+        cancelAnimationFrame(animationFrameId)
+      }
       
-      translateX.value = lastTranslate.value.x + deltaX * dragSensitivity
-      translateY.value = lastTranslate.value.y + deltaY * dragSensitivity
-      
-      // Constrain during drag to prevent dead zones
-      constrainTranslation()
+      // Use requestAnimationFrame for smooth updates
+      animationFrameId = requestAnimationFrame(() => {
+        const deltaX = e.clientX - dragStart.value.x
+        const deltaY = e.clientY - dragStart.value.y
+        
+        // Apply sensitivity factor for more controlled movement (0.5 = 50% of mouse movement)
+        const dragSensitivity = 0.1
+        
+        translateX.value = lastTranslate.value.x + deltaX * dragSensitivity
+        translateY.value = lastTranslate.value.y + deltaY * dragSensitivity
+        
+        // Constrain during drag (but less frequently for performance)
+        constrainTranslation()
+      })
     }
     
     const handleMouseUp = () => {
       if (isDragging.value) {
+        // Cancel any pending animation frame
+        if (animationFrameId) {
+          cancelAnimationFrame(animationFrameId)
+          animationFrameId = null
+        }
+        
         // Final constraint check
         constrainTranslation()
         lastTranslate.value = { x: translateX.value, y: translateY.value }
@@ -804,22 +832,34 @@ export default {
         // Constrain during pinch zoom
         constrainTranslation()
       } else if (touches.value.length === 1 && isDragging.value) {
-        // Single touch drag
-        const deltaX = touches.value[0].clientX - dragStart.value.x
-        const deltaY = touches.value[0].clientY - dragStart.value.y
+        // Single touch drag - use requestAnimationFrame for smooth updates
+        if (animationFrameId) {
+          cancelAnimationFrame(animationFrameId)
+        }
         
-        // Apply damping factor to reduce acceleration (0.8 = 80% of movement)
-        const dragSensitivity = 0.8
-        
-        translateX.value = lastTranslate.value.x + deltaX * dragSensitivity
-        translateY.value = lastTranslate.value.y + deltaY * dragSensitivity
-        
-        // Constrain during drag
-        constrainTranslation()
+        animationFrameId = requestAnimationFrame(() => {
+          const deltaX = touches.value[0].clientX - dragStart.value.x
+          const deltaY = touches.value[0].clientY - dragStart.value.y
+          
+          // Apply sensitivity factor for more controlled movement (0.5 = 50% of touch movement)
+          const dragSensitivity = 0.1
+          
+          translateX.value = lastTranslate.value.x + deltaX * dragSensitivity
+          translateY.value = lastTranslate.value.y + deltaY * dragSensitivity
+          
+          // Constrain during drag
+          constrainTranslation()
+        })
       }
     }
     
     const handleTouchEnd = () => {
+      // Cancel any pending animation frame
+      if (animationFrameId) {
+        cancelAnimationFrame(animationFrameId)
+        animationFrameId = null
+      }
+      
       if (touches.value.length <= 1) {
         // Final constraint check
         constrainTranslation()
@@ -1709,6 +1749,7 @@ export default {
   -webkit-user-select: none;
   -moz-user-select: none;
   -ms-user-select: none;
+  touch-action: none;
 }
 
 .map-viewer:active {
@@ -1721,6 +1762,8 @@ export default {
   left: 0;
   pointer-events: none;
   will-change: transform;
+  backface-visibility: hidden;
+  transform: translateZ(0);
 }
 
 .map-viewer.map-dragging .map-image-wrapper {
