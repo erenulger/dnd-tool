@@ -456,6 +456,10 @@ export default {
     const containerWidth = ref(0)
     const containerHeight = ref(0)
     
+    // Pawn circle size - must match CSS --pawn-circle-size variable
+    // Note: This is 36px for desktop. Mobile uses 32px but the 2px difference is negligible.
+    const PAWN_CIRCLE_SIZE = 36
+    
     // Pawns
     const pawns = ref([])
     const sessionMembers = ref([])
@@ -964,11 +968,14 @@ export default {
       const screenX = translateX.value + (imageX * scale.value)
       const screenY = translateY.value + (imageY * scale.value)
       
+      // Calculate vertical offset to center on the pawn circle (not the entire container)
+      const circleVerticalOffset = PAWN_CIRCLE_SIZE / 2
+      
       return {
         position: 'absolute',
         left: `${screenX}px`,
         top: `${screenY}px`,
-        transform: 'translate(-50%, -18px)', // Center the pawn circle on its position (18px = half of 36px circle height)
+        transform: `translate(-50%, -${circleVerticalOffset}px)`, // Center the pawn circle on its position
         transformOrigin: 'center center'
       }
     }
@@ -1678,7 +1685,13 @@ export default {
 </script>
 
 <style scoped>
+/* Pawn circle size - used for centering transform */
+:root {
+  --pawn-circle-size: 36px;
+}
+
 .map-viewer-container {
+  --pawn-circle-size: 36px;
   position: relative;
   width: 100%;
   height: 500px;
@@ -1819,8 +1832,8 @@ export default {
 }
 
 .pawn-circle {
-  width: 36px;
-  height: 36px;
+  width: var(--pawn-circle-size, 36px);
+  height: var(--pawn-circle-size, 36px);
   border-radius: 50%;
   border: 2px solid white;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
@@ -2376,8 +2389,12 @@ export default {
   }
   
   .pawn-circle {
-    width: 32px;
-    height: 32px;
+    width: var(--pawn-circle-size, 32px);
+    height: var(--pawn-circle-size, 32px);
+  }
+  
+  .map-viewer-container {
+    --pawn-circle-size: 32px;
   }
   
   .pawn-initial {
