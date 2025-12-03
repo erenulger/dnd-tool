@@ -1698,6 +1698,216 @@ app.delete('/api/pawns/:pawnId', verifyAuth, async (req, res) => {
   }
 });
 
+// ========== PAWN PREFAB LIBRARY ENDPOINTS ==========
+
+// Get all pawn prefabs for a user (DM only)
+app.get('/api/pawn-prefabs', verifyAuth, async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    // Get all prefabs created by this user
+    const { data: prefabs, error } = await supabase
+      .from('pawn_prefabs')
+      .select('*')
+      .eq('created_by', userId)
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+
+    res.json({ prefabs: prefabs || [] });
+  } catch (error) {
+    console.error('Get pawn prefabs error:', error);
+    res.status(500).json({ error: error.message || 'Failed to fetch pawn prefabs' });
+  }
+});
+
+// Create a new pawn prefab (DM only)
+app.post('/api/pawn-prefabs', verifyAuth, async (req, res) => {
+  try {
+    const { name, color, status_color, owned_by, hp, max_hp, visible } = req.body;
+    const userId = req.user.id;
+
+    if (!name || !name.trim()) {
+      return res.status(400).json({ error: 'Name is required' });
+    }
+
+    // Create prefab (no x_position, y_position, or session_id)
+    const { data: prefab, error: prefabError } = await supabase
+      .from('pawn_prefabs')
+      .insert({
+        created_by: userId,
+        name: name.trim(),
+        color: color || '#667eea',
+        status_color: status_color || null,
+        owned_by: owned_by || null,
+        hp: hp !== undefined && hp !== null ? hp : null,
+        max_hp: max_hp !== undefined && max_hp !== null ? max_hp : null,
+        visible: visible !== undefined ? visible : true,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      })
+      .select()
+      .single();
+
+    if (prefabError) throw prefabError;
+
+    res.status(201).json({ prefab });
+  } catch (error) {
+    console.error('Create pawn prefab error:', error);
+    res.status(500).json({ error: error.message || 'Failed to create pawn prefab' });
+  }
+});
+
+// Update a pawn prefab (DM only, owner only)
+app.put('/api/pawn-prefabs/:prefabId', verifyAuth, async (req, res) => {
+  try {
+    const { prefabId } = req.params;
+    const { name, color, status_color, owned_by, hp, max_hp, visible } = req.body;
+    const userId = req.user.id;
+
+    // Get prefab and verify ownership
+    const { data: prefab, error: prefabError } = await supabase
+      .from('pawn_prefabs')
+      .select('created_by')
+      .eq('id', prefabId)
+      .single();
+
+    if (prefabError || !prefab) {
+      return res.status(404).json({ error: 'Prefab not found' });
+    }
+
+    if (prefab.created_by !== userId) {
+      return res.status(403).json({ error: 'You can only edit your own prefabs' });
+    }
+
+    // Build update object
+    const updateData = {
+      updated_at: new Date().toISOString()
+    };
+    
+    if (name !== undefined) updateData.name = name.trim();
+    if (color !== undefined) updateData.color = color;
+    if (status_color !== undefined) updateData.status_color = status_color || null;
+    if (owned_by !== undefined) updateData.owned_by = owned_by || null;
+    if (hp !== undefined) updateData.hp = hp !== null ? hp : null;
+    if (max_hp !== undefined) updateData.max_hp = max_hp !== null ? max_hp : null;
+    if (visible !== undefined) updateData.visible = visible;
+
+    // Update prefab
+    const { data: updatedPrefab, error: updateError } = await supabase
+      .from('pawn_prefabs')
+      .update(updateData)
+      .eq('id', prefabId)
+      .select()
+      .single();
+
+    if (updateError) throw updateError;
+
+    res.json({ prefab: updatedPrefab });
+  } catch (error) {
+    console.error('Update pawn prefab error:', error);
+    res.status(500).json({ error: error.message || 'Failed to update pawn prefab' });
+  }
+});
+
+// Delete a pawn prefab (DM only, owner only)
+app.delete('/api/pawn-prefabs/:prefabId', verifyAuth, async (req, res) => {
+  try {
+    const { prefabId } = req.params;
+    const userId = req.user.id;
+
+    // Get prefab and verify ownership
+    const { data: prefab, error: prefabError } = await supabase
+      .from('pawn_prefabs')
+      .select('created_by')
+      .eq('id', prefabId)
+      .single();
+
+    if (prefabError || !prefab) {
+      return res.status(404).json({ error: 'Prefab not found' });
+    }
+
+    if (prefab.created_by !== userId) {
+      return res.status(403).json({ error: 'You can only delete your own prefabs' });
+    }
+
+    // Delete prefab
+    const { error: deleteError } = await supabase
+      .from('pawn_prefabs')
+      .delete()
+      .eq('id', prefabId);
+
+    if (deleteError) throw deleteError;
+
+    res.json({ message: 'Prefab deleted successfully' });
+  } catch (error) {
+    console.error('Delete pawn prefab error:', error);
+    res.status(500).json({ error: error.message || 'Failed to delete pawn prefab' });
+  }
+});
+
+// Create a pawn from a prefab (DM only)
+app.post('/api/sessions/:sessionId/pawns/from-prefab/:prefabId', verifyAuth, async (req, res) => {
+  try {
+    const { sessionId, prefabId } = req.params;
+    const { x_position, y_position } = req.body;
+    const userId = req.user.id;
+
+    // Verify user is DM or developer
+    const userEmail = req.user.email;
+    const isDev = isDeveloper(userId, userEmail);
+    const { data: membership, error: memberError } = await supabase
+      .from('session_members')
+      .select('is_dm')
+      .eq('session_id', sessionId)
+      .eq('user_id', userId)
+      .single();
+
+    if ((memberError || !membership || !membership.is_dm) && !isDev) {
+      return res.status(403).json({ error: 'Only the DM or a developer can create pawns from prefabs' });
+    }
+
+    // Get prefab
+    const { data: prefab, error: prefabError } = await supabase
+      .from('pawn_prefabs')
+      .select('*')
+      .eq('id', prefabId)
+      .single();
+
+    if (prefabError || !prefab) {
+      return res.status(404).json({ error: 'Prefab not found' });
+    }
+
+    // Create pawn from prefab
+    const { data: pawn, error: pawnError } = await supabase
+      .from('pawns')
+      .insert({
+        session_id: sessionId,
+        created_by: userId,
+        owned_by: prefab.owned_by || null,
+        name: prefab.name,
+        color: prefab.color,
+        status_color: prefab.status_color || null,
+        x_position: x_position !== undefined ? parseFloat(x_position) : 0,
+        y_position: y_position !== undefined ? parseFloat(y_position) : 0,
+        hp: prefab.hp !== null && prefab.hp !== undefined ? prefab.hp : null,
+        max_hp: prefab.max_hp !== null && prefab.max_hp !== undefined ? prefab.max_hp : null,
+        visible: prefab.visible !== undefined ? prefab.visible : true,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      })
+      .select()
+      .single();
+
+    if (pawnError) throw pawnError;
+
+    res.status(201).json({ pawn });
+  } catch (error) {
+    console.error('Create pawn from prefab error:', error);
+    res.status(500).json({ error: error.message || 'Failed to create pawn from prefab' });
+  }
+});
+
 // Get enemy statistics for a session
 app.get('/api/sessions/:sessionId/enemies', verifyAuth, async (req, res) => {
   try {

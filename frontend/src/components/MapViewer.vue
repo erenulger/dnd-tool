@@ -47,6 +47,8 @@
       @mousedown="handleMouseDown"
       @wheel="handleWheel"
       @touchstart="handleTouchStart"
+      @dragover.prevent="handleDragOver"
+      @drop="handleDrop"
     >
       <div class="map-image-wrapper" :style="imageStyle">
         <img
@@ -425,7 +427,7 @@ export default {
       default: false
     }
   },
-  emits: ['pawn-moved', 'pawn-created', 'enemy-status-changed', 'fog-of-war-updated', 'pawn-clicked'],
+  emits: ['pawn-moved', 'pawn-created', 'enemy-status-changed', 'fog-of-war-updated', 'pawn-clicked', 'prefab-dropped'],
   setup(props, { emit }) {
     const containerRef = ref(null)
     const viewerRef = ref(null)
@@ -1122,6 +1124,52 @@ export default {
         cancelFogDrawing()
       }
     }
+
+    const handleDragOver = (e) => {
+      // Only allow drop if DM and not in fog drawing mode
+      if (props.isDm && fogDrawMode.value !== 'draw' && fogDrawMode.value !== 'delete') {
+        e.preventDefault()
+        e.dataTransfer.dropEffect = 'copy'
+      }
+    }
+
+    const handleDrop = async (e) => {
+      if (!props.isDm || fogDrawMode.value === 'draw' || fogDrawMode.value === 'delete') {
+        return
+      }
+
+      e.preventDefault()
+      e.stopPropagation()
+
+      try {
+        // Get drop data
+        const data = e.dataTransfer.getData('text/plain')
+        if (!data) return
+
+        const dropData = JSON.parse(data)
+        if (dropData.type !== 'pawn-prefab' || !dropData.prefabId) return
+
+        // Get drop position relative to viewer
+        if (!viewerRef.value) return
+
+        const rect = viewerRef.value.getBoundingClientRect()
+        const screenX = e.clientX - rect.left
+        const screenY = e.clientY - rect.top
+
+        // Convert screen coordinates to image pixel coordinates
+        const imageX = (screenX - translateX.value) / scale.value
+        const imageY = (screenY - translateY.value) / scale.value
+
+        // Clamp to image bounds
+        const clampedX = Math.max(0, Math.min(imageWidth.value, imageX))
+        const clampedY = Math.max(0, Math.min(imageHeight.value, imageY))
+
+        // Emit event to parent (SessionView) to handle the prefab drop
+        emit('prefab-dropped', dropData.prefabId, clampedX, clampedY)
+      } catch (err) {
+        console.error('Error handling prefab drop:', err)
+      }
+    }
     
     const handlePawnClick = (e, pawn) => {
       if (props.initiativeMode) {
@@ -1671,7 +1719,10 @@ export default {
       cancelFogDrawing,
       toggleFogDrawMode,
       deleteFog,
-      handleKeyDown
+      handleKeyDown,
+      handleDragOver,
+      handleDrop,
+      loadPawns
     }
   }
 }
@@ -1791,7 +1842,7 @@ export default {
   -khtml-user-drag: none;
   -moz-user-drag: none;
   -o-user-drag: none;
-  user-drag: none;
+  -user-drag: none;
 }
 
 .pawns-overlay {

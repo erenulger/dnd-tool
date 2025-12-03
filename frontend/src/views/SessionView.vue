@@ -180,6 +180,7 @@
           <div v-if="currentMap || (isDmOrDeveloper && unsharedMap)" class="map-container">
             <MapViewer 
               v-if="session && (currentMap || unsharedMap)"
+              ref="mapViewerRef"
               :map-url="getMapUrl((currentMap || unsharedMap).file_path)"
               :map-name="(currentMap || unsharedMap).original_filename"
               :session-id="sessionId"
@@ -192,6 +193,7 @@
               @enemy-status-changed="loadEnemyStats"
               @fog-of-war-updated="handleFogOfWarUpdated"
               @pawn-clicked="handlePawnClickForInitiative"
+              @prefab-dropped="handlePrefabDrop"
             />
             
             <!-- Initiative Table Overlay -->
@@ -253,6 +255,13 @@
           </div>
         </div>
       </div>
+
+      <!-- Pawn Prefab Library (DM only) -->
+      <PawnPrefabLibrary
+        v-if="isDmOrDeveloper"
+        :session-id="sessionId"
+        :session-members="session?.members || []"
+      />
     </div>
   </div>
 
@@ -851,12 +860,14 @@ import { useRoute, useRouter } from 'vue-router'
 import api, { getApiUrl } from '../lib/api'
 import { supabase } from '../lib/supabase'
 import MapViewer from '../components/MapViewer.vue'
+import PawnPrefabLibrary from '../components/PawnPrefabLibrary.vue'
 import { characterClasses, getClassSlug as getClassSlugFromConfig, generateBadgeClassCSS, generateClassOptionCSS } from '../lib/classColorConfig'
 
 export default {
   name: 'SessionView',
   components: {
-    MapViewer
+    MapViewer,
+    PawnPrefabLibrary
   },
   setup() {
     const route = useRoute()
@@ -870,6 +881,7 @@ export default {
     const uploading = ref(false)
     const uploadProgress = ref(0)
     const fileInput = ref(null)
+    const mapViewerRef = ref(null)
     const sharingMap = ref(false)
     const inviteEmail = ref('')
     const inviting = ref(false)
@@ -1256,6 +1268,24 @@ export default {
       if (showCreateInitiative.value) {
         initiativeInputPawn.value = pawn
         tempInitiativeValue.value = initiativeValues.value[pawn.id] || null
+      }
+    }
+
+    const handlePrefabDrop = async (prefabId, xPosition, yPosition) => {
+      if (!prefabId || !sessionId) return
+      
+      try {
+        await api.post(`/sessions/${sessionId}/pawns/from-prefab/${prefabId}`, {
+          x_position: xPosition,
+          y_position: yPosition
+        })
+        // Reload pawns to show the new one
+        if (mapViewerRef.value && mapViewerRef.value.loadPawns) {
+          mapViewerRef.value.loadPawns()
+        }
+      } catch (err) {
+        console.error('Error creating pawn from prefab:', err)
+        alert(err.response?.data?.error || 'Failed to create pawn from prefab')
       }
     }
 
@@ -2063,8 +2093,10 @@ export default {
       uploading,
       uploadProgress,
       fileInput,
+      mapViewerRef,
       triggerFileInput,
       handleFileSelect,
+      handlePrefabDrop,
       transferDM,
       getMapUrl,
       formatDate,
