@@ -1,0 +1,165 @@
+/**
+ * Light Theme - All UI Colors
+ * Change colors here to update the entire light theme
+ */
+
+:root {
+  /* Primary Colors */
+  --primary-color: #667eea;
+  --primary-hover: #5568d3;
+  --primary-light: rgba(102, 126, 234, 0.1);
+  --primary-shadow: rgba(102, 126, 234, 0.3);
+  --primary-shadow-hover: rgba(102, 126, 234, 0.4);
+  --primary-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+
+  /* Secondary Colors */
+  --secondary-color: #6c757d;
+  --secondary-hover: #5a6268;
+  --secondary-light: rgba(108, 117, 125, 0.1);
+
+  /* Danger/Error Colors */
+  --danger-color: #dc3545;
+  --danger-hover: #c82333;
+  --danger-light: #f8d7da;
+  --danger-text: #dc3545;
+
+  /* Success Colors */
+  --success-color: #28a745;
+  --success-light: #d4edda;
+  --success-text: #155724;
+
+  /* Warning Colors */
+  --warning-color: #ffc107;
+  --warning-text: #333333;
+  --warning-light: #fff3cd;
+
+  /* Info Colors */
+  --info-color: #17a2b8;
+  --info-light: #d1ecf1;
+  --info-text: #0c5460;
+
+  /* Background Colors */
+  --bg-primary: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  --bg-secondary: #ffffff;
+  --bg-tertiary: #f8f9fa;
+  --bg-quaternary: #e9ecef;
+  --bg-input: #ffffff;
+  --bg-hover: #f5f5f5;
+  --bg-modal-overlay: rgba(0, 0, 0, 0.5);
+  --bg-card: #ffffff;
+  --bg-apple-notes: #f5f5f7;
+
+  /* Text Colors */
+  --text-primary: #333333;
+  --text-secondary: #666666;
+  --text-tertiary: #999999;
+  --text-inverse: #ffffff;
+  --text-muted: #999999;
+  --text-link: #667eea;
+  --text-link-hover: #5568d3;
+
+  /* Border Colors */
+  --border-color: #e0e0e0;
+  --border-color-light: #f0f0f0;
+  --border-color-dark: #d0d0d0;
+  --border-focus: #667eea;
+
+  /* Shadow Colors */
+  --shadow: rgba(0, 0, 0, 0.1);
+  --shadow-hover: rgba(0, 0, 0, 0.2);
+  --shadow-light: rgba(0, 0, 0, 0.05);
+  --shadow-medium: rgba(0, 0, 0, 0.15);
+  --shadow-dark: rgba(0, 0, 0, 0.3);
+
+  /* Badge Colors */
+  --badge-dm-bg: #ffc107;
+  --badge-dm-text: #333333;
+  --badge-member-bg: #6c757d;
+  --badge-member-text: #ffffff;
+
+  /* Header Colors */
+  --header-bg: rgba(255, 255, 255, 0.95);
+  --header-shadow: rgba(0, 0, 0, 0.1);
+  --header-text: #667eea;
+
+  /* Button Colors */
+  --btn-primary-bg: #667eea;
+  --btn-primary-text: #ffffff;
+  --btn-primary-hover-bg: #5568d3;
+  --btn-primary-shadow: rgba(102, 126, 234, 0.4);
+
+  --btn-secondary-bg: #6c757d;
+  --btn-secondary-text: #ffffff;
+  --btn-secondary-hover-bg: #5a6268;
+
+  --btn-danger-bg: #dc3545;
+  --btn-danger-text: #ffffff;
+  --btn-danger-hover-bg: #c82333;
+
+  --btn-disabled-opacity: 0.6;
+
+  /* Input Colors */
+  --input-bg: #ffffff;
+  --input-border: #e0e0e0;
+  --input-border-focus: #667eea;
+  --input-text: #333333;
+  --input-placeholder: #999999;
+
+  /* Modal Colors */
+  --modal-bg: #ffffff;
+  --modal-overlay: rgba(0, 0, 0, 0.5);
+  --modal-shadow: rgba(0, 0, 0, 0.3);
+  --modal-header-bg: rgba(255, 255, 255, 0.8);
+
+  /* Dice Colors */
+  --dice-bg: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  --dice-text: #ffffff;
+  --dice-shadow: rgba(102, 126, 234, 0.4);
+  --dice-crit: #28a745;
+  --dice-fail: #dc3545;
+
+  /* Map Colors */
+  --map-status-draft-bg: #ffc107;
+  --map-status-draft-text: #333333;
+  --map-status-shared-bg: #28a745;
+  --map-status-shared-text: #ffffff;
+
+  /* Initiative Colors */
+  --initiative-active-bg: #667eea;
+  --initiative-active-text: #ffffff;
+  --initiative-bg: var(--bg-secondary);
+  --initiative-text: var(--text-primary);
+
+  /* Quote Colors */
+  --quote-accent: #667eea;
+  --quote-bg: var(--bg-tertiary);
+
+  /* Enemy Stats Colors */
+  --enemy-killed: #dc3545;
+  --enemy-fled: #ffc107;
+  --enemy-freed: #17a2b8;
+
+  /* Notes Colors */
+  --note-item-bg: #ffffff;
+  --note-item-shadow: rgba(0, 0, 0, 0.1);
+  --note-delete-hover: rgba(255, 59, 48, 0.1);
+  --note-delete-text: #ff3b30;
+
+  /* Upload Area Colors */
+  --upload-area-border: #667eea;
+  --upload-area-bg: #f8f9fa;
+  --upload-area-hover-bg: #e9ecef;
+  --upload-area-dragover-bg: #e7f3ff;
+
+  /* Session Card Colors */
+  --session-card-bg: #ffffff;
+  --session-card-shadow: rgba(0, 0, 0, 0.1);
+  --session-card-hover-shadow: rgba(0, 0, 0, 0.2);
+  --session-card-title: #667eea;
+
+  /* Floating Button Colors */
+  --floating-btn-bg: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  --floating-btn-shadow: rgba(102, 126, 234, 0.4);
+  --floating-btn-hover-shadow: rgba(102, 126, 234, 0.6);
+}
+

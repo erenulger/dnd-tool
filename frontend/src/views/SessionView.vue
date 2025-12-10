@@ -19,7 +19,7 @@
     <div class="container">
       <div v-if="loading" class="loading">
         Loading session...
-        <div style="margin-top: 10px; font-size: 12px; color: #999;">
+        <div style="margin-top: 10px; font-size: 12px; color: var(--text-tertiary);">
           If this takes too long, check your connection and try refreshing.
         </div>
       </div>
@@ -89,61 +89,76 @@
           </div>
         </div>
 
-        <!-- Enemy Statistics Widget -->
-        <div class="enemy-stats-widget card">
-          <div class="enemy-stats-header">
-            <h3>⚔️ Enemy Statistics</h3>
-            <button @click="showManageEnemies = true" class="btn btn-primary btn-small">
-              Show All
-            </button>
-          </div>
-          <div class="enemy-stats-content">
-            <div class="stat-item">
-              <span class="stat-label">Killed:</span>
-              <span class="stat-value">{{ enemyStats.killed }}</span>
-            </div>
-            <div class="stat-item">
-              <span class="stat-label">Fled:</span>
-              <span class="stat-value">{{ enemyStats.fled }}</span>
-            </div>
-            <div class="stat-item">
-              <span class="stat-label">Freed:</span>
-              <span class="stat-value">{{ enemyStats.freed }}</span>
-            </div>
-          </div>
-        </div>
-
-        <!-- Cycling Quotes Widget -->
-        <div class="quotes-widget card">
-          <div class="quotes-widget-header">
-            <h3>💬 Memorable Quotes</h3>
-            <button @click="showManageQuotes = true" class="btn btn-primary btn-small">
-              Manage
-            </button>
-          </div>
-          <div class="quotes-cycler">
-            <transition name="fade" mode="out-in">
-              <div v-if="currentQuote" :key="currentQuoteIndex" class="quote-display">
-                <div class="quote-display-text">"{{ currentQuote.quote_text }}"</div>
-                <div class="quote-display-author">-<i>{{ currentQuote.author_name }}</i></div>
+        <!-- Two Column Layout -->
+        <div class="session-grid">
+          <!-- Left Column -->
+          <div class="session-column">
+            <!-- Enemy Statistics Widget -->
+            <div class="enemy-stats-widget card">
+              <div class="enemy-stats-header">
+                <h3>⚔️ Enemy Statistics</h3>
+                <button @click="showManageEnemies = true" class="btn btn-primary btn-small">
+                  Show All
+                </button>
               </div>
-              <div v-else class="quote-display-empty">
-                <p>No quotes yet. Click "Manage Quotes" to add one!</p>
+              <div class="enemy-stats-content">
+                <div class="stat-item">
+                  <span class="stat-label">Killed:</span>
+                  <span class="stat-value">{{ enemyStats.killed }}</span>
+                </div>
+                <div class="stat-item">
+                  <span class="stat-label">Fled:</span>
+                  <span class="stat-value">{{ enemyStats.fled }}</span>
+                </div>
+                <div class="stat-item">
+                  <span class="stat-label">Freed:</span>
+                  <span class="stat-value">{{ enemyStats.freed }}</span>
+                </div>
               </div>
-            </transition>
-            <div v-if="quotes.length > 1" class="quote-indicators">
-              <span 
-                v-for="(quote, index) in quotes" 
-                :key="quote.id"
-                :class="['quote-indicator', index === currentQuoteIndex ? 'active' : '']"
-                @click="currentQuoteIndex = index"
-              ></span>
             </div>
           </div>
-        </div>
 
-        <!-- Map Section -->
-        <div class="card" id="area-map-section">
+          <!-- Right Column -->
+          <div class="session-column">
+            <!-- Cycling Quotes Widget -->
+            <div class="quotes-widget card">
+              <div class="quotes-widget-header">
+                <h3>💬 Memorable Quotes</h3>
+                <button @click="showManageQuotes = true" class="btn btn-primary btn-small">
+                  Manage
+                </button>
+              </div>
+              <div class="quotes-cycler">
+                <transition name="fade" mode="out-in">
+                  <div v-if="currentQuote" :key="currentQuoteIndex" class="quote-display">
+                    <div class="quote-display-text">"{{ currentQuote.quote_text }}"</div>
+                    <div class="quote-display-author">-<i>{{ currentQuote.author_name }}</i></div>
+                  </div>
+                  <div v-else class="quote-display-empty">
+                    <p>No quotes yet. Click "Manage Quotes" to add one!</p>
+                  </div>
+                </transition>
+                <div v-if="quotes.length > 1" class="quote-indicators">
+                  <span 
+                    v-for="(quote, index) in quotes" 
+                    :key="quote.id"
+                    :class="['quote-indicator', index === currentQuoteIndex ? 'active' : '']"
+                    @click="currentQuoteIndex = index"
+                  ></span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Character Sheet Preview (for non-DM players) -->
+            <CharacterSheetPreview 
+              v-if="!currentUserMember?.is_dm" 
+              :session-id="sessionId" 
+              class="character-sheet-preview-section"
+            />
+          </div>
+
+          <!-- Map Section - Spans Both Columns -->
+          <div class="card map-section-full-width" id="area-map-section">
           <div class="map-section-header">
             <h2 class="area-map-title" @click="scrollToMap">Area Map</h2>
             <div class="map-section-actions">
@@ -253,6 +268,7 @@
             <p v-if="isDmOrDeveloper">No map uploaded yet. Click "Upload Map" to add one.</p>
             <p v-else>No map has been uploaded yet. The DM will upload a map soon!</p>
           </div>
+        </div>
         </div>
       </div>
 
@@ -808,7 +824,7 @@
                       </span>
                       <span>
                         {{ member.nickname || member.users?.email || 'Unknown' }}
-                        <small v-if="member.nickname" style="color: #999; margin-left: 8px;">
+                        <small v-if="member.nickname" style="color: var(--text-tertiary); margin-left: 8px;">
                           ({{ member.users?.email }})
                         </small>
                       </span>
@@ -861,13 +877,15 @@ import api, { getApiUrl } from '../lib/api'
 import { supabase } from '../lib/supabase'
 import MapViewer from '../components/MapViewer.vue'
 import PawnPrefabLibrary from '../components/PawnPrefabLibrary.vue'
+import CharacterSheetPreview from '../components/CharacterSheetPreview.vue'
 import { characterClasses, getClassSlug as getClassSlugFromConfig, generateBadgeClassCSS, generateClassOptionCSS } from '../lib/classColorConfig'
 
 export default {
   name: 'SessionView',
   components: {
     MapViewer,
-    PawnPrefabLibrary
+    PawnPrefabLibrary,
+    CharacterSheetPreview
   },
   setup() {
     const route = useRoute()
@@ -966,7 +984,6 @@ export default {
     // Use centralized class config
     const dndClasses = characterClasses
     let pollInterval = null
-    let quotesPollInterval = null
     let enemyStatsPollInterval = null
     let quoteCycleInterval = null
 
@@ -1996,6 +2013,10 @@ export default {
       }
     }
 
+    const goToCharacterSheet = () => {
+      router.push(`/session/${sessionId}/character`)
+    }
+
     // Poll for map updates (for non-DM/developer users)
     const startPolling = () => {
       if (!isDmOrDeveloper.value) {
@@ -2040,34 +2061,19 @@ export default {
       // Load map after session is loaded (with proper filtering)
       await loadMap()
       startPolling()
-        await loadQuotes()
-        await loadEnemyStats()
-        await loadPersonalNotes()
-        await loadSharedNotes()
-        await loadPawns()
+      await loadQuotes()
+      await loadEnemyStats()
+      await loadPersonalNotes()
+      await loadSharedNotes()
+      await loadPawns()
       
-      // Poll for new quotes every 3 seconds
-      quotesPollInterval = setInterval(() => {
-        loadQuotes()
-      }, 3000)
+      // Note: Quotes and notes are only updated through user actions (add/edit/delete),
+      // which already trigger reloads, so no polling is needed
       
       // Poll for enemy stats every 5 seconds
       enemyStatsPollInterval = setInterval(() => {
         loadEnemyStats()
       }, 5000)
-      
-      // Poll for notes every 3 seconds
-      const notesPollInterval = setInterval(() => {
-        loadPersonalNotes()
-        loadSharedNotes()
-      }, 3000)
-      
-      // Store interval for cleanup
-      onUnmounted(() => {
-        if (notesPollInterval) {
-          clearInterval(notesPollInterval)
-        }
-      })
       
       // Start cycling quotes
       startQuoteCycle()
@@ -2076,9 +2082,6 @@ export default {
     onUnmounted(() => {
       stopPolling()
       stopQuoteCycle()
-      if (quotesPollInterval) {
-        clearInterval(quotesPollInterval)
-      }
       if (enemyStatsPollInterval) {
         clearInterval(enemyStatsPollInterval)
       }
@@ -2200,7 +2203,8 @@ export default {
       handlePhbFilterChange,
       searchDndContent,
       viewDndItem,
-      formatDndItem
+      formatDndItem,
+      goToCharacterSheet
     }
   }
 }
@@ -2276,8 +2280,8 @@ export default {
 }
 
 .btn-dice {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: white;
+  background: var(--dice-bg);
+  color: var(--dice-text);
   border: none;
   padding: 10px 16px;
   border-radius: 8px;
@@ -2285,7 +2289,7 @@ export default {
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s ease;
-  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+  box-shadow: 0 2px 8px var(--dice-shadow);
   min-width: 50px;
   display: flex;
   align-items: center;
@@ -2323,7 +2327,7 @@ export default {
 .dice-result-value {
   font-size: 72px;
   font-weight: 700;
-  color: #667eea;
+  color: var(--primary-color);
   margin-bottom: 8px;
   text-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
   animation: dice-pop 0.5s ease-out;
@@ -2339,7 +2343,7 @@ export default {
 .dice-result-crit {
   font-size: 20px;
   font-weight: 700;
-  color: #28a745;
+  color: var(--dice-crit);
   margin-top: 12px;
   animation: crit-pulse 1s ease-in-out infinite;
 }
@@ -2347,7 +2351,7 @@ export default {
 .dice-result-fail {
   font-size: 20px;
   font-weight: 700;
-  color: #dc3545;
+  color: var(--dice-fail);
   margin-top: 12px;
   animation: fail-pulse 1s ease-in-out infinite;
 }
@@ -2406,6 +2410,37 @@ export default {
   margin-top: 0;
 }
 
+/* Two Column Grid Layout */
+.session-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.session-column {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* Map spans both columns */
+.map-section-full-width {
+  grid-column: 1 / -1;
+  margin-top: 0;
+}
+
+/* Responsive: Stack columns on mobile */
+@media (max-width: 768px) {
+  .session-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .map-section-full-width {
+    grid-column: 1;
+  }
+}
+
 .map-section-header {
   display: flex;
   justify-content: space-between;
@@ -2431,7 +2466,7 @@ export default {
 }
 
 .area-map-title:hover {
-  color: #667eea;
+  color: var(--primary-color);
   opacity: 0.8;
 }
 
@@ -2479,13 +2514,13 @@ export default {
 }
 
 .map-status-draft {
-  background: #ffc107;
-  color: #333;
+  background: var(--map-status-draft-bg);
+  color: var(--map-status-draft-text);
 }
 
 .map-status-shared {
-  background: #28a745;
-  color: white;
+  background: var(--map-status-shared-bg);
+  color: var(--map-status-shared-text);
 }
 
 .share-map-btn {
@@ -2577,15 +2612,15 @@ export default {
 }
 
 .initiative-item-small.active {
-  background: var(--primary-color);
-  color: white;
-  border: 2px solid var(--primary-color);
+  background: var(--initiative-active-bg);
+  color: var(--initiative-active-text);
+  border: 2px solid var(--initiative-active-bg);
 }
 
 .initiative-item-small.active .initiative-rank-small,
 .initiative-item-small.active .initiative-name-small,
 .initiative-item-small.active .initiative-value-small {
-  color: white;
+  color: var(--initiative-active-text);
 }
 
 .initiative-rank-small {
@@ -2608,6 +2643,10 @@ export default {
   font-size: 11px;
   text-align: right;
   justify-self: end;
+}
+
+.initiative-item-small.active .initiative-value-small {
+  color: var(--initiative-active-text);
 }
 
 .initiative-creation-banner {
@@ -2671,8 +2710,12 @@ export default {
   color: var(--text-secondary);
 }
 
+.character-sheet-preview-section {
+  margin-bottom: 0;
+}
+
 .quotes-widget {
-  margin-bottom: 16px;
+  margin-bottom: 0;
 }
 
 .quotes-widget-header {
@@ -2687,7 +2730,7 @@ export default {
 
 .quotes-widget-header h3 {
   margin: 0;
-  color: #667eea;
+  color: var(--quote-accent);
   font-size: 18px;
 }
 
@@ -2752,7 +2795,7 @@ export default {
 }
 
 .quote-indicator.active {
-  background: #667eea;
+  background: var(--quote-accent);
   width: 24px;
   border-radius: 4px;
 }
@@ -2811,7 +2854,7 @@ export default {
   padding: 12px;
   background: var(--bg-tertiary);
   border-radius: 6px;
-  border-left: 3px solid #667eea;
+  border-left: 3px solid var(--quote-accent);
   transition: background 0.3s ease;
 }
 
@@ -2892,7 +2935,7 @@ export default {
 .quotes-modal .quote-edit-form .form-group textarea:focus,
 .quotes-modal .quote-edit-form .form-group input:focus {
   outline: none;
-  border-color: #667eea;
+  border-color: var(--border-focus);
 }
 
 .quotes-modal .quote-edit-form .form-actions {
@@ -2906,7 +2949,7 @@ export default {
   padding: 12px;
   border-radius: 6px;
   margin: 12px 0;
-  border-left: 3px solid #667eea;
+  border-left: 3px solid var(--quote-accent);
 }
 
 .quote-preview .quote-text {
@@ -2944,7 +2987,7 @@ export default {
 
 .quotes-modal .add-quote-form h3 {
   margin: 0 0 12px 0;
-  color: #667eea;
+  color: var(--quote-accent);
   font-size: 16px;
 }
 
@@ -2981,7 +3024,7 @@ export default {
 .quotes-modal .add-quote-form textarea:focus,
 .quotes-modal .add-quote-form input:focus {
   outline: none;
-  border-color: #667eea;
+  border-color: var(--border-focus);
 }
 
 .quotes-modal .add-quote-form .btn {
@@ -3062,7 +3105,7 @@ export default {
 
 .modal-header h2 {
   margin: 0;
-  color: #667eea;
+  color: var(--header-text);
   font-size: 20px;
 }
 
@@ -3123,13 +3166,13 @@ export default {
 
 .nickname-modal .form-group input:focus {
   outline: none;
-  border-color: #667eea;
+  border-color: var(--border-focus);
 }
 
 .nickname-modal .form-group small {
   display: block;
   margin-top: 6px;
-  color: #999;
+  color: var(--text-tertiary);
   font-size: 12px;
 }
 
@@ -3142,13 +3185,13 @@ export default {
 
 .invite-section h3 {
   margin: 0 0 12px 0;
-  color: #667eea;
+  color: var(--header-text);
   font-size: 18px;
 }
 
 .members-section h3 {
   margin: 0 0 12px 0;
-  color: #667eea;
+  color: var(--header-text);
   font-size: 18px;
 }
 
@@ -3184,13 +3227,13 @@ export default {
 
 .delete-session-section h3 {
   margin: 0 0 12px 0;
-  color: #dc3545;
+  color: var(--danger-color);
   font-size: 18px;
 }
 
 .delete-session-warning {
-  background: #fff3cd;
-  border: 2px solid #ffc107;
+  background: var(--warning-light);
+  border: 2px solid var(--warning-color);
   border-radius: 6px;
   padding: 16px;
 }
@@ -3212,7 +3255,7 @@ export default {
 .delete-input {
   width: 100%;
   padding: 10px;
-  border: 2px solid #dc3545;
+  border: 2px solid var(--danger-color);
   border-radius: 6px;
   font-size: 14px;
   font-family: inherit;
@@ -3509,7 +3552,7 @@ export default {
 
 /* Enemy Statistics Widget */
 .enemy-stats-widget {
-  margin-bottom: 16px;
+  margin-bottom: 0;
 }
 
 .enemy-stats-header {
@@ -3524,7 +3567,7 @@ export default {
 
 .enemy-stats-header h3 {
   margin: 0;
-  color: #667eea;
+  color: var(--header-text);
   font-size: 18px;
 }
 
@@ -3551,7 +3594,7 @@ export default {
 .stat-value {
   font-size: 20px;
   font-weight: 700;
-  color: #667eea;
+  color: var(--primary-color);
 }
 
 /* Enemies Modal */
@@ -3585,7 +3628,7 @@ export default {
 .stat-summary-value {
   font-size: 24px;
   font-weight: 700;
-  color: #667eea;
+  color: var(--primary-color);
 }
 
 .enemies-list {
@@ -3619,20 +3662,20 @@ export default {
   background: var(--bg-tertiary);
   border-radius: 6px;
   margin-bottom: 8px;
-  border-left: 3px solid #667eea;
+  border-left: 3px solid var(--quote-accent);
   transition: background 0.3s ease;
 }
 
 .enemy-item.enemy-killed {
-  border-left-color: #dc3545;
+  border-left-color: var(--enemy-killed);
 }
 
 .enemy-item.enemy-fled {
-  border-left-color: #ffc107;
+  border-left-color: var(--enemy-fled);
 }
 
 .enemy-item.enemy-freed {
-  border-left-color: #17a2b8;
+  border-left-color: var(--enemy-freed);
 }
 
 .enemy-name {
@@ -3729,11 +3772,11 @@ export default {
   height: 56px;
   border-radius: 50%;
   border: none;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: white;
+  background: var(--floating-btn-bg);
+  color: var(--text-inverse);
   font-size: 24px;
   cursor: pointer;
-  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+  box-shadow: 0 4px 12px var(--floating-btn-shadow);
   z-index: 100;
   display: flex;
   align-items: center;
@@ -3744,7 +3787,7 @@ export default {
 
 .floating-note-btn:hover {
   transform: scale(1.1);
-  box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6);
+  box-shadow: 0 6px 20px var(--floating-btn-hover-shadow);
 }
 
 .floating-note-btn:active {
@@ -3789,11 +3832,7 @@ export default {
 }
 
 .apple-notes-style {
-  background: #f5f5f7;
-}
-
-.dark-theme .apple-notes-style {
-  background: #1d1d1f;
+  background: var(--bg-apple-notes);
 }
 
 .notes-modal-header {
@@ -3877,10 +3916,10 @@ export default {
 }
 
 .note-item-apple {
-  background: white;
+  background: var(--note-item-bg);
   border-radius: 8px;
   padding: 16px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 1px 3px var(--note-item-shadow);
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
@@ -3888,17 +3927,9 @@ export default {
   transition: all 0.2s ease;
 }
 
-.dark-theme .note-item-apple {
-  background: #2d2d2f;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
-}
 
 .note-item-apple:hover {
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
-}
-
-.dark-theme .note-item-apple:hover {
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 2px 6px var(--shadow-medium);
 }
 
 .note-content-wrapper {
@@ -3945,8 +3976,8 @@ export default {
 }
 
 .note-delete-btn-apple:hover {
-  background: rgba(255, 59, 48, 0.1);
-  color: #ff3b30;
+  background: var(--note-delete-hover);
+  color: var(--note-delete-text);
 }
 
 .no-notes-apple {
@@ -3968,54 +3999,42 @@ export default {
 .note-title-input-apple {
   width: 100%;
   padding: 10px 12px;
-  border: 1px solid rgba(0, 0, 0, 0.1);
+  border: 1px solid var(--border-color);
   border-radius: 8px;
   font-size: 16px;
   font-weight: 600;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  background: white;
-  color: #000000;
+  background: var(--input-bg);
+  color: var(--input-text);
   transition: all 0.2s ease;
   margin-bottom: 12px;
 }
 
-.dark-theme .note-title-input-apple {
-  background: #2d2d2f;
-  border-color: rgba(255, 255, 255, 0.1);
-  color: #f5f5f7;
-}
-
 .note-title-input-apple:focus {
   outline: none;
-  border-color: #667eea;
-  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+  border-color: var(--border-focus);
+  box-shadow: 0 0 0 3px var(--primary-light);
 }
 
 .note-input-apple {
   width: 100%;
   padding: 12px;
-  border: 1px solid rgba(0, 0, 0, 0.1);
+  border: 1px solid var(--border-color);
   border-radius: 8px;
   font-size: 15px;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  background: white;
-  color: #000000;
+  background: var(--input-bg);
+  color: var(--input-text);
   resize: vertical;
   min-height: 80px;
   transition: all 0.2s ease;
   margin-bottom: 12px;
 }
 
-.dark-theme .note-input-apple {
-  background: #2d2d2f;
-  border-color: rgba(255, 255, 255, 0.1);
-  color: #f5f5f7;
-}
-
 .note-input-apple:focus {
   outline: none;
-  border-color: #667eea;
-  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+  border-color: var(--border-focus);
+  box-shadow: 0 0 0 3px var(--primary-light);
 }
 
 .note-color-selector {
@@ -4059,8 +4078,8 @@ export default {
 .note-add-btn-apple {
   padding: 10px 20px;
   border: none;
-  background: #667eea;
-  color: white;
+  background: var(--btn-primary-bg);
+  color: var(--btn-primary-text);
   font-size: 15px;
   font-weight: 500;
   border-radius: 8px;
@@ -4069,9 +4088,9 @@ export default {
 }
 
 .note-add-btn-apple:hover:not(:disabled) {
-  background: #5568d3;
+  background: var(--btn-primary-hover-bg);
   transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+  box-shadow: 0 4px 12px var(--btn-primary-shadow);
 }
 
 .note-add-btn-apple:active:not(:disabled) {

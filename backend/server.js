@@ -2387,6 +2387,148 @@ app.delete('/api/shared-notes/:noteId', verifyAuth, async (req, res) => {
   }
 });
 
+// ========== CHARACTER SHEET ENDPOINTS ==========
+
+// Get character sheet for current user in a session
+app.get('/api/sessions/:sessionId/character-sheet', verifyAuth, async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const userId = req.user.id;
+
+    // Verify user is a member
+    const { data: membership, error: memberError } = await supabase
+      .from('session_members')
+      .select('id, is_dm, nickname, character_class')
+      .eq('session_id', sessionId)
+      .eq('user_id', userId)
+      .single();
+
+    if (memberError || !membership) {
+      return res.status(403).json({ error: 'You are not a member of this session' });
+    }
+
+    // Get character sheet if it exists
+    const { data: characterSheet, error: sheetError } = await supabase
+      .from('character_sheets')
+      .select('*')
+      .eq('session_id', sessionId)
+      .eq('user_id', userId)
+      .single();
+
+    // If no sheet exists, return default structure with member info
+    if (sheetError && sheetError.code === 'PGRST116') {
+      // No sheet found, return default structure
+      return res.json({
+        characterSheet: {
+          session_id: sessionId,
+          user_id: userId,
+          character_name: membership.nickname || null,
+          character_class: membership.character_class || null,
+          level: 1,
+          race: null,
+          background: null,
+          alignment: null,
+          experience_points: 0,
+          strength: 10,
+          dexterity: 10,
+          constitution: 10,
+          intelligence: 10,
+          wisdom: 10,
+          charisma: 10,
+          hit_points: null,
+          max_hit_points: null,
+          temporary_hit_points: 0,
+          armor_class: 10,
+          speed: 30,
+          proficiency_bonus: 2,
+          skills: {},
+          saving_throws: {},
+          equipment: [],
+          spells: [],
+          spell_slots: {},
+          notes: null,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        },
+        isNew: true
+      });
+    }
+
+    if (sheetError) throw sheetError;
+
+    res.json({ characterSheet, isNew: false });
+  } catch (error) {
+    console.error('Get character sheet error:', error);
+    res.status(500).json({ error: error.message || 'Failed to fetch character sheet' });
+  }
+});
+
+// Create or update character sheet
+app.put('/api/sessions/:sessionId/character-sheet', verifyAuth, async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const userId = req.user.id;
+    const characterSheetData = req.body;
+
+    // Verify user is a member
+    const { data: membership, error: memberError } = await supabase
+      .from('session_members')
+      .select('id')
+      .eq('session_id', sessionId)
+      .eq('user_id', userId)
+      .single();
+
+    if (memberError || !membership) {
+      return res.status(403).json({ error: 'You are not a member of this session' });
+    }
+
+    // Check if sheet exists
+    const { data: existingSheet } = await supabase
+      .from('character_sheets')
+      .select('id')
+      .eq('session_id', sessionId)
+      .eq('user_id', userId)
+      .single();
+
+    const sheetData = {
+      session_id: sessionId,
+      user_id: userId,
+      ...characterSheetData,
+      updated_at: new Date().toISOString()
+    };
+
+    let result;
+    if (existingSheet) {
+      // Update existing sheet
+      const { data: updatedSheet, error: updateError } = await supabase
+        .from('character_sheets')
+        .update(sheetData)
+        .eq('id', existingSheet.id)
+        .select()
+        .single();
+
+      if (updateError) throw updateError;
+      result = updatedSheet;
+    } else {
+      // Create new sheet
+      sheetData.created_at = new Date().toISOString();
+      const { data: newSheet, error: createError } = await supabase
+        .from('character_sheets')
+        .insert(sheetData)
+        .select()
+        .single();
+
+      if (createError) throw createError;
+      result = newSheet;
+    }
+
+    res.json({ characterSheet: result, message: existingSheet ? 'Character sheet updated' : 'Character sheet created' });
+  } catch (error) {
+    console.error('Save character sheet error:', error);
+    res.status(500).json({ error: error.message || 'Failed to save character sheet' });
+  }
+});
+
 // Start server
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Server running on http://0.0.0.0:${PORT}`);

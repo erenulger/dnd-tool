@@ -97,19 +97,14 @@ export default {
 
 <style scoped>
 .navbar {
-  background: rgba(255, 255, 255, 0.95);
+  background: var(--header-bg);
   backdrop-filter: blur(10px);
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 2px 10px var(--header-shadow);
   padding: 16px 0;
   position: sticky;
   top: 0;
   z-index: 100;
   transition: background 0.3s ease;
-}
-
-.dark-theme .navbar {
-  background: rgba(45, 45, 68, 0.95);
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
 }
 
 .nav-content {
@@ -119,7 +114,7 @@ export default {
 }
 
 .nav-content h1 {
-  color: #667eea;
+  color: var(--header-text);
   font-size: 24px;
 }
 
@@ -130,7 +125,7 @@ export default {
 }
 
 .nav-logo:hover {
-  color: #5568d3;
+  color: var(--primary-hover);
   transform: scale(1.05);
 }
 
@@ -148,7 +143,7 @@ export default {
 
 .theme-toggle {
   background: none;
-  border: 2px solid #667eea;
+  border: 2px solid var(--primary-color);
   border-radius: 6px;
   padding: 8px 12px;
   font-size: 18px;
@@ -162,7 +157,7 @@ export default {
 }
 
 .theme-toggle:hover {
-  background: #667eea;
+  background: var(--primary-color);
   transform: scale(1.05);
 }
 </style>

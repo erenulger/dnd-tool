@@ -4,30 +4,8 @@
   box-sizing: border-box;
 }
 
-:root {
-  /* Light theme (default) */
-  --bg-primary: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  --bg-secondary: #ffffff;
-  --bg-tertiary: #f8f9fa;
-  --text-primary: #333333;
-  --text-secondary: #666666;
-  --text-tertiary: #999999;
-  --border-color: #e0e0e0;
-  --shadow: rgba(0, 0, 0, 0.1);
-  --shadow-hover: rgba(0, 0, 0, 0.2);
-}
-
-.dark-theme {
-  --bg-primary: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-  --bg-secondary: #2d2d44;
-  --bg-tertiary: #1e1e2e;
-  --text-primary: #e0e0e0;
-  --text-secondary: #b0b0b0;
-  --text-tertiary: #808080;
-  --border-color: #404040;
-  --shadow: rgba(0, 0, 0, 0.3);
-  --shadow-hover: rgba(0, 0, 0, 0.5);
-}
+/* Theme variables are imported from lib/themes/light-theme.css and lib/themes/dark-theme.css */
+/* Edit those files to change colors! */
 
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
@@ -71,32 +49,32 @@ body {
 }
 
 .btn-primary {
-  background: #667eea;
-  color: white;
+  background: var(--btn-primary-bg);
+  color: var(--btn-primary-text);
 }
 
 .btn-primary:hover {
-  background: #5568d3;
+  background: var(--btn-primary-hover-bg);
   transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+  box-shadow: 0 4px 12px var(--btn-primary-shadow);
 }
 
 .btn-secondary {
-  background: #6c757d;
-  color: white;
+  background: var(--btn-secondary-bg);
+  color: var(--btn-secondary-text);
 }
 
 .btn-secondary:hover {
-  background: #5a6268;
+  background: var(--btn-secondary-hover-bg);
 }
 
 .btn-danger {
-  background: #dc3545;
-  color: white;
+  background: var(--btn-danger-bg);
+  color: var(--btn-danger-text);
 }
 
 .btn-danger:hover {
-  background: #c82333;
+  background: var(--btn-danger-hover-bg);
 }
 
 .btn:disabled {
@@ -111,18 +89,23 @@ input[type="password"],
 textarea {
   width: 100%;
   padding: 10px;
-  border: 2px solid var(--border-color);
+  border: 2px solid var(--input-border);
   border-radius: 6px;
   font-size: 14px;
-  background: var(--bg-secondary);
-  color: var(--text-primary);
+  background: var(--input-bg);
+  color: var(--input-text);
   transition: border-color 0.2s ease, background 0.3s ease, color 0.3s ease;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--input-placeholder);
 }
 
 input:focus,
 textarea:focus {
   outline: none;
-  border-color: #667eea;
+  border-color: var(--input-border-focus);
 }
 
 .form-group {
@@ -138,16 +121,16 @@ textarea:focus {
 }
 
 .error {
-  color: #dc3545;
-  background: #f8d7da;
+  color: var(--danger-text);
+  background: var(--danger-light);
   padding: 12px;
   border-radius: 8px;
   margin-bottom: 20px;
 }
 
 .success {
-  color: #155724;
-  background: #d4edda;
+  color: var(--success-text);
+  background: var(--success-light);
   padding: 12px;
   border-radius: 8px;
   margin-bottom: 20px;
@@ -156,7 +139,7 @@ textarea:focus {
 .loading {
   text-align: center;
   padding: 40px;
-  color: white;
+  color: var(--text-inverse);
   font-size: 18px;
 }
 
@@ -183,7 +166,7 @@ textarea:focus {
 
 .session-card h3 {
   margin-bottom: 10px;
-  color: #667eea;
+  color: var(--session-card-title);
 }
 
 .session-card p {
@@ -201,13 +184,13 @@ textarea:focus {
 }
 
 .badge-dm {
-  background: #ffc107;
-  color: #333;
+  background: var(--badge-dm-bg);
+  color: var(--badge-dm-text);
 }
 
 .badge-member {
-  background: #6c757d;
-  color: white;
+  background: var(--badge-member-bg);
+  color: var(--badge-member-text);
 }
 
 .map-container {
@@ -223,23 +206,23 @@ textarea:focus {
 }
 
 .upload-area {
-  border: 2px dashed #667eea;
+  border: 2px dashed var(--upload-area-border);
   border-radius: 8px;
   padding: 40px;
   text-align: center;
-  background: #f8f9fa;
+  background: var(--upload-area-bg);
   cursor: pointer;
   transition: all 0.3s ease;
 }
 
 .upload-area:hover {
-  background: #e9ecef;
-  border-color: #5568d3;
+  background: var(--upload-area-hover-bg);
+  border-color: var(--primary-hover);
 }
 
 .upload-area.dragover {
-  background: #e7f3ff;
-  border-color: #667eea;
+  background: var(--upload-area-dragover-bg);
+  border-color: var(--upload-area-border);
 }
 
 .file-input {
