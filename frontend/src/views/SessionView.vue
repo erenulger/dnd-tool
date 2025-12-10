@@ -1376,7 +1376,12 @@ export default {
       try {
         const { data } = await api.get(`/sessions/${sessionId}/enemies`)
         enemies.value = data.enemies || []
-        enemyStats.value = data.stats || { killed: 0, fled: 0, freed: 0, total: 0 }
+        const stats = data.stats || { killed: 0, fled: 0, freed: 0, total: 0 }
+        // Update properties individually to maintain reactivity
+        enemyStats.value.killed = stats.killed || 0
+        enemyStats.value.fled = stats.fled || 0
+        enemyStats.value.freed = stats.freed || 0
+        enemyStats.value.total = stats.total || 0
       } catch (err) {
         console.error('Error loading enemy stats:', err)
       }

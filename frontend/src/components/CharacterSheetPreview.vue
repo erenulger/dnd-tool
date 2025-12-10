@@ -114,7 +114,7 @@
             </div>
           </div>
 
-          <!-- Tab 2: Equipment -->
+          <!-- Tab 2: Equipment & Weapons -->
           <div class="swipe-panel">
             <div class="panel-section">
               <h4>Equipment</h4>
@@ -123,14 +123,37 @@
               </div>
               <div v-else class="equipment-compact">
                 <div 
-                  v-for="(item, index) in equipmentList.slice(0, 10)" 
+                  v-for="(item, index) in equipmentList.slice(0, 5)" 
                   :key="index"
                   class="equipment-item-compact"
                 >
                   {{ item }}
                 </div>
-                <div v-if="equipmentList.length > 10" class="more-items">
-                  +{{ equipmentList.length - 10 }} more
+                <div v-if="equipmentList.length > 5" class="more-items">
+                  +{{ equipmentList.length - 5 }} more
+                </div>
+              </div>
+              
+              <h4 style="margin-top: 16px;">Weapons</h4>
+              <div v-if="weaponsList.length === 0" class="empty-state">
+                No weapons
+              </div>
+              <div v-else class="weapons-compact">
+                <div 
+                  v-for="(weapon, index) in weaponsList.slice(0, 5)" 
+                  :key="index"
+                  class="weapon-item-compact"
+                >
+                  <div class="weapon-name-compact">{{ weapon.name }}</div>
+                  <div class="weapon-stats-compact">
+                    <span v-if="weapon.atk_bonus !== null && weapon.atk_bonus !== undefined">
+                      {{ weapon.atk_bonus >= 0 ? '+' : '' }}{{ weapon.atk_bonus }}
+                    </span>
+                    <span v-if="weapon.damage" class="weapon-damage-compact">{{ weapon.damage }}</span>
+                  </div>
+                </div>
+                <div v-if="weaponsList.length > 5" class="more-items">
+                  +{{ weaponsList.length - 5 }} more
                 </div>
               </div>
             </div>
@@ -261,6 +284,22 @@ export default {
         : []
     })
 
+    const weaponsList = computed(() => {
+      if (!characterSheet.value || !characterSheet.value.weapons) return []
+      if (!Array.isArray(characterSheet.value.weapons)) return []
+      // Ensure all weapons are proper objects with required properties
+      return characterSheet.value.weapons.map(weapon => {
+        if (!weapon || typeof weapon !== 'object') {
+          return { name: '', atk_bonus: null, damage: '' }
+        }
+        return {
+          name: weapon.name || '',
+          atk_bonus: weapon.atk_bonus ?? null,
+          damage: weapon.damage || ''
+        }
+      })
+    })
+
     const spellsList = computed(() => {
       if (!characterSheet.value || !characterSheet.value.spells) return []
       return Array.isArray(characterSheet.value.spells) 
@@ -321,6 +360,23 @@ export default {
         if (!characterSheet.value.spell_slots) {
           characterSheet.value.spell_slots = {}
         }
+        if (!characterSheet.value.weapons) {
+          characterSheet.value.weapons = []
+        }
+        if (!Array.isArray(characterSheet.value.weapons)) {
+          characterSheet.value.weapons = []
+        }
+        // Ensure all weapons are proper objects with required properties
+        characterSheet.value.weapons = characterSheet.value.weapons.map(weapon => {
+          if (!weapon || typeof weapon !== 'object') {
+            return { name: '', atk_bonus: null, damage: '' }
+          }
+          return {
+            name: weapon.name || '',
+            atk_bonus: weapon.atk_bonus ?? null,
+            damage: weapon.damage || ''
+          }
+        })
       } catch (err) {
         console.error('Error loading character sheet:', err)
         error.value = err.response?.data?.error || err.message || 'Failed to load character sheet'
@@ -408,6 +464,7 @@ export default {
       firstHalfSkills,
       secondHalfSkills,
       equipmentList,
+      weaponsList,
       spellsList,
       spellSlots,
       dragOffset,
@@ -683,7 +740,7 @@ export default {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  max-height: 300px;
+  max-height: 200px;
   overflow-y: auto;
 }
 
@@ -697,6 +754,49 @@ export default {
 
 .dark-theme .equipment-item-compact {
   background: var(--bg-secondary);
+}
+
+/* Weapons */
+.weapons-compact {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.weapon-item-compact {
+  padding: 8px 10px;
+  background: #f8f9fa;
+  border-radius: 4px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.dark-theme .weapon-item-compact {
+  background: var(--bg-secondary);
+}
+
+.weapon-name-compact {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  flex: 1;
+}
+
+.weapon-stats-compact {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.weapon-damage-compact {
+  color: var(--primary-color);
+  font-weight: 500;
 }
 
 /* Spell Slots */

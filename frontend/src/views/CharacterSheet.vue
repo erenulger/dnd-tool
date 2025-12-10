@@ -188,6 +188,50 @@
             </div>
           </div>
 
+          <!-- Weapons -->
+          <div class="card section-weapons">
+            <h2>Weapons</h2>
+            <div class="weapons-list">
+              <div 
+                v-for="(weapon, index) in weaponsList" 
+                :key="index"
+                class="weapon-item"
+              >
+                <div class="weapon-fields">
+                  <div class="form-group">
+                    <label>Name</label>
+                    <input 
+                      type="text"
+                      v-model="weapon.name" 
+                      placeholder="e.g., Longsword"
+                      @blur="updateWeapons"
+                    />
+                  </div>
+                  <div class="form-group">
+                    <label>Attack Bonus</label>
+                    <input 
+                      type="number"
+                      v-model.number="weapon.atk_bonus" 
+                      placeholder="+5"
+                      @blur="updateWeapons"
+                    />
+                  </div>
+                  <div class="form-group">
+                    <label>Damage/Type</label>
+                    <input 
+                      type="text"
+                      v-model="weapon.damage" 
+                      placeholder="e.g., 1d8 + 2 slashing"
+                      @blur="updateWeapons"
+                    />
+                  </div>
+                </div>
+                <button @click="removeWeapon(index)" class="btn-icon" title="Remove">×</button>
+              </div>
+              <button @click="addWeapon" class="btn btn-secondary btn-small">+ Add Weapon</button>
+            </div>
+          </div>
+
           <!-- Spells -->
           <div class="card section-spells">
             <h2>Spells</h2>
@@ -322,6 +366,20 @@ export default {
       }
     })
 
+    const weaponsList = computed({
+      get: () => {
+        if (!characterSheet.value || !characterSheet.value.weapons) return []
+        if (!Array.isArray(characterSheet.value.weapons)) return []
+        // Return the array directly so v-model can update the original objects
+        return characterSheet.value.weapons
+      },
+      set: (val) => {
+        if (characterSheet.value) {
+          characterSheet.value.weapons = val
+        }
+      }
+    })
+
     const spellsList = computed({
       get: () => {
         if (!characterSheet.value || !characterSheet.value.spells) return []
@@ -402,6 +460,25 @@ export default {
         if (typeof characterSheet.value.spell_slots !== 'object' || characterSheet.value.spell_slots === null) {
           characterSheet.value.spell_slots = {}
         }
+        
+        // Initialize weapons array if needed
+        if (!characterSheet.value.weapons) {
+          characterSheet.value.weapons = []
+        }
+        if (!Array.isArray(characterSheet.value.weapons)) {
+          characterSheet.value.weapons = []
+        }
+        // Ensure all weapons are proper objects with required properties
+        characterSheet.value.weapons = characterSheet.value.weapons.map(weapon => {
+          if (!weapon || typeof weapon !== 'object') {
+            return { name: '', atk_bonus: null, damage: '' }
+          }
+          return {
+            name: weapon.name || '',
+            atk_bonus: weapon.atk_bonus ?? null,
+            damage: weapon.damage || ''
+          }
+        })
       } catch (err) {
         console.error('Error loading character sheet:', err)
         error.value = err.response?.data?.error || err.message || 'Failed to load character sheet'
@@ -415,11 +492,14 @@ export default {
       error.value = ''
 
       try {
-        // Ensure equipment and spells are arrays
+        // Ensure equipment, weapons, and spells are arrays
         const sheetData = {
           ...characterSheet.value,
           equipment: Array.isArray(characterSheet.value.equipment) 
             ? characterSheet.value.equipment 
+            : [],
+          weapons: Array.isArray(characterSheet.value.weapons) 
+            ? characterSheet.value.weapons 
             : [],
           spells: Array.isArray(characterSheet.value.spells) 
             ? characterSheet.value.spells 
@@ -457,6 +537,29 @@ export default {
 
     const updateEquipment = () => {
       characterSheet.value.equipment = characterSheet.value.equipment.filter(item => item.trim() !== '')
+    }
+
+    const addWeapon = () => {
+      if (!characterSheet.value.weapons) {
+        characterSheet.value.weapons = []
+      }
+      characterSheet.value.weapons.push({
+        name: '',
+        atk_bonus: null,
+        damage: ''
+      })
+    }
+
+    const removeWeapon = (index) => {
+      characterSheet.value.weapons.splice(index, 1)
+      updateWeapons()
+    }
+
+    const updateWeapons = () => {
+      // Filter out empty weapons (no name)
+      if (characterSheet.value.weapons) {
+        characterSheet.value.weapons = characterSheet.value.weapons.filter(weapon => weapon && weapon.name && weapon.name.trim() !== '')
+      }
     }
 
     const addSpell = () => {
@@ -546,6 +649,7 @@ export default {
       abilities,
       skills,
       equipmentList,
+      weaponsList,
       spellsList,
       spellSlots,
       getModifier,
@@ -556,6 +660,9 @@ export default {
       addEquipment,
       removeEquipment,
       updateEquipment,
+      addWeapon,
+      removeWeapon,
+      updateWeapons,
       addSpell,
       removeSpell,
       updateSpells,
@@ -789,15 +896,76 @@ export default {
 .spell-item input {
   flex: 1;
   padding: 8px 12px;
-  border: 2px solid #e0e0e0;
+  border: 2px solid var(--input-border);
   border-radius: 6px;
 }
 
 .dark-theme .equipment-item input,
 .dark-theme .spell-item input {
+  background: var(--input-bg);
+  border-color: var(--input-border);
+  color: var(--input-text);
+}
+
+/* Weapons */
+.weapons-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.weapon-item {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 12px;
+  background: var(--bg-tertiary);
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+}
+
+.dark-theme .weapon-item {
   background: var(--bg-secondary);
-  border-color: #444;
-  color: var(--text-primary);
+}
+
+.weapon-fields {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 2fr 1fr 2fr;
+  gap: 12px;
+  align-items: end;
+}
+
+.weapon-fields .form-group {
+  margin-bottom: 0;
+}
+
+.weapon-fields label {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.weapon-fields input {
+  width: 100%;
+  padding: 8px 12px;
+  border: 2px solid var(--input-border);
+  border-radius: 6px;
+  background: var(--input-bg);
+  color: var(--input-text);
+}
+
+.weapon-fields input:focus {
+  outline: none;
+  border-color: var(--input-border-focus);
+}
+
+@media (max-width: 768px) {
+  .weapon-fields {
+    grid-template-columns: 1fr;
+  }
 }
 
 .btn-icon {

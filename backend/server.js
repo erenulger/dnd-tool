@@ -2444,6 +2444,7 @@ app.get('/api/sessions/:sessionId/character-sheet', verifyAuth, async (req, res)
           skills: {},
           saving_throws: {},
           equipment: [],
+          weapons: [],
           spells: [],
           spell_slots: {},
           notes: null,
